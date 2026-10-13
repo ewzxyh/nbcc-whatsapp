@@ -470,5 +470,5 @@ export function phasesForEntry(entry: AgendaEntry, allItems: readonly AgendaItem
 export function courseLabel(entry: AgendaEntry): string {
   if (entry.kind === 'event') return CAMPUS_EVENT_LABEL
   if (entry.course && entry.courseTitle) return `${entry.course} · ${entry.courseTitle}`
-  return entry.course ?? CAMPUS_EVENT_LABEL
+  return entry.course ?? 'Course not listed'
 }

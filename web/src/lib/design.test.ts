@@ -64,6 +64,7 @@ describe('palette contrast', () => {
     ['progress-5', 'card', 3],
     ['progress-track', 'card', 3],
     ['progress-track', 'today', 3],
+    ['today-border', 'background', 3],
   ]
 
   it('defines every token used in the pairs', () => {
@@ -79,6 +80,7 @@ describe('palette contrast', () => {
         month: '2026-10', today: '2026-10-13', selectedDate, items: [],
         onSelectDate: () => {}, onPreviousMonth: () => {}, onNextMonth: () => {}, onToday: () => {},
         filtersActive: false, onClearFilters: () => {}, onSelect: () => {},
+        focusHeading: false, onHeadingFocused: () => {},
       }))
       const selected = html.match(/<button\b[^>]*aria-pressed="true"[^>]*>/)?.[0]
       expect(selected).toBeDefined()

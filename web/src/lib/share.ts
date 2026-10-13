@@ -1,13 +1,14 @@
 import { CAMPUS_EVENT_LABEL, courseLabel, formatLongDate, formatTime, phaseLabel, type AgendaEntry } from './agenda'
 import type { AgendaItem } from './api'
 
+// Order matters: "Final Project" must match Project before the Exam pattern sees "final".
 const KIND_PATTERNS: [RegExp, string][] = [
+  [/project/i, 'Project'],
+  [/essay/i, 'Essay'],
   [/quiz/i, 'Quiz'],
   [/lab(?!ora)/i, 'Lab'],
   [/assign/i, 'Assignment'],
   [/exam|midterm|final/i, 'Exam'],
-  [/project/i, 'Project'],
-  [/essay/i, 'Essay'],
 ]
 
 /** Assessment type read from its title, such as "Quiz 3" or "Lab01". Null when the title does not say. */

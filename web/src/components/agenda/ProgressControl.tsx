@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { Check } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   EMPTY_PROGRESS,
@@ -9,8 +10,10 @@ import {
   type ProgressStatus,
 } from '@/lib/progress'
 
+// Selected state is shown by a check mark and bolder text as well as colour (WCAG 1.4.1).
+// Phones stack the options at full width, because three columns at 320 px cannot hold 16 px labels and a check mark.
 const ITEM_CLASS =
-  'h-11 min-w-0 flex-1 rounded-xl border border-input bg-background px-3 text-base font-medium text-foreground transition-colors hover:bg-surface data-[state=on]:border-primary data-[state=on]:bg-accent data-[state=on]:text-accent-foreground sm:flex-none'
+  'group/item h-auto min-h-11 min-w-0 flex-1 justify-start gap-2 rounded-xl border border-input bg-background px-3 py-2 text-left text-base leading-snug font-medium whitespace-normal text-foreground transition-colors hover:bg-surface data-[state=on]:border-2 data-[state=on]:border-primary data-[state=on]:bg-accent data-[state=on]:font-semibold data-[state=on]:text-accent-foreground sm:flex-none sm:justify-center sm:text-center'
 
 const OPTIONS: { value: ProgressStatus; label: string }[] = [
   { value: 'not_started', label: 'Not started' },
@@ -28,11 +31,12 @@ export function ProgressControl({ storageKey, title }: { storageKey: string; tit
       value={status}
       onValueChange={(next) => setProgress(storageKey, (next || 'not_started') as ProgressStatus)}
       aria-label={`Progress for ${title}`}
-      className="flex w-full flex-wrap gap-2 sm:w-auto"
+      className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto"
     >
       {OPTIONS.map((option) => (
         <ToggleGroupItem key={option.value} value={option.value} className={ITEM_CLASS}>
-          {option.label}
+          <Check aria-hidden="true" className="hidden size-4 shrink-0 group-data-[state=on]/item:block" />
+          <span>{option.label}</span>
         </ToggleGroupItem>
       ))}
     </ToggleGroup>

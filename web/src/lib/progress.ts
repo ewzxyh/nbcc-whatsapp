@@ -61,7 +61,8 @@ function listenForOtherTabs() {
   if (storageListening || typeof globalThis.addEventListener !== 'function') return
   storageListening = true
   globalThis.addEventListener('storage', (event: StorageEvent) => {
-    if (event.key !== PROGRESS_STORAGE_KEY) return
+    // A null key means another tab called clear(), which affects every record.
+    if (event.key !== PROGRESS_STORAGE_KEY && event.key !== null) return
     snapshot = null
     notify()
   })
@@ -87,7 +88,8 @@ export function statusFor(map: ProgressMap, key: string): ProgressStatus {
 
 /** Sets one item's status. "not_started" removes the record. Storage failures keep the change for this page only. */
 export function setProgress(key: string, status: ProgressStatus, now = Date.now()): void {
-  const next: ProgressMap = { ...current() }
+  // Re-read storage so a change made in another tab since the last read is kept.
+  const next: ProgressMap = { ...readStorage(now) }
   if (status === 'not_started') delete next[key]
   else next[key] = { status, expiresAt: now + PROGRESS_TTL_MS }
   snapshot = next

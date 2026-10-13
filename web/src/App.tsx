@@ -13,7 +13,10 @@ import { Button } from '@/components/ui/button'
 import { useAgenda } from '@/hooks/useAgenda'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { NowContext, useMinuteClock } from '@/hooks/useNow'
+import { OpeningsContext } from '@/hooks/useOpenings'
+import { openingsByActivity } from '@/lib/deadlines'
 import {
+  monctonDate,
   applyFilters,
   deriveProfessors,
   deriveSubjects,
@@ -47,6 +50,7 @@ export default function App() {
   const [revision, setRevision] = useState(0)
   const [monthOverride, setMonthOverride] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [focusCalendarHeading, setFocusCalendarHeading] = useState(false)
   const [detail, setDetail] = useState<AgendaEntry | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const triggerRef = useRef<HTMLElement | null>(null)
@@ -59,6 +63,7 @@ export default function App() {
   const calendarQuery = useAgenda(month ? monthRange(month) : undefined, revision, view === 'calendar' && month !== null)
 
   const allItems = defaultQuery.data?.items ?? NO_ITEMS
+  const openings = useMemo(() => openingsByActivity(allItems), [allItems])
   const calendarItemsAll = calendarQuery.data?.items ?? NO_ITEMS
 
   const filters = useMemo(
@@ -82,6 +87,8 @@ export default function App() {
     setQuery('')
     setShowCampus(true)
     setShowPast(false)
+    // The clear button can unmount when filters reset, so focus moves to the search field instead.
+    document.getElementById('agenda-search')?.focus()
   }, [])
 
   const openDetail = useCallback((entry: AgendaEntry, trigger: HTMLElement) => {
@@ -92,9 +99,17 @@ export default function App() {
 
   const refresh = useCallback(() => setRevision((value) => value + 1), [])
 
+  // The agenda is cached per session, so after midnight the "Today" group would stay on the old date until a refresh.
+  useEffect(() => {
+    if (today && monctonDate(new Date(now).toISOString()) !== today) refresh()
+  }, [now, today, refresh])
+
+  const onHeadingFocused = useCallback(() => setFocusCalendarHeading(false), [])
+
   const goToMonth = (next: string) => {
     setMonthOverride(next)
     setSelectedDate(today && monthOf(today) === next ? today : null)
+    setFocusCalendarHeading(true)
   }
   const effectiveSelectedDate =
     selectedDate ?? (today && month && monthOf(today) === month ? today : null)
@@ -123,6 +138,7 @@ export default function App() {
 
   return (
     <NowContext.Provider value={now}>
+     <OpeningsContext.Provider value={openings}>
       <a
         href="#agenda"
         className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-xl focus:bg-primary focus:px-4 focus:py-3 focus:text-base focus:font-medium focus:text-primary-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
@@ -130,32 +146,38 @@ export default function App() {
         Skip to agenda
       </a>
 
-      <div
-        className={cn(
-          'mx-auto flex min-h-dvh w-full flex-col gap-6 px-4 py-6 sm:px-6 md:py-8',
-          view === 'board' ? 'max-w-7xl' : 'max-w-5xl',
-        )}
-      >
-        <AppHeader
-          updatedAt={defaultQuery.data?.updatedAt}
-          now={now}
-          refreshing={refreshing}
-          onRefresh={refresh}
-        />
-
-        <section aria-label="Search and filters" className="space-y-6 rounded-2xl border border-border p-4 sm:p-5">
-          <SearchField value={query} onChange={setQuery} />
-          <FilterPanel
-            showCampus={showCampus}
-            onShowCampusChange={setShowCampus}
-            showPast={showPast}
-            onShowPastChange={setShowPast}
-            filtersActive={filtersActive}
-            onClearFilters={clearFilters}
+      {/* The page shell is always wide enough for Board. Header and filters keep one width on every view. */}
+      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 md:py-8">
+        <div className="mx-auto w-full max-w-5xl space-y-6">
+          <AppHeader
+            updatedAt={defaultQuery.data?.updatedAt}
+            now={now}
+            refreshing={refreshing}
+            onRefresh={refresh}
           />
-        </section>
 
-        <main id="agenda" tabIndex={-1} aria-busy={loading} className="space-y-6 outline-none">
+          <section aria-label="Search and filters" className="space-y-6 rounded-2xl border border-border p-4 sm:p-5">
+            <SearchField value={query} onChange={setQuery} />
+            <FilterPanel
+              showCampus={showCampus}
+              onShowCampusChange={setShowCampus}
+              showPast={showPast}
+              onShowPastChange={setShowPast}
+              filtersActive={filtersActive}
+              onClearFilters={clearFilters}
+            />
+          </section>
+        </div>
+
+        <main
+          id="agenda"
+          tabIndex={-1}
+          aria-busy={loading}
+          className={cn(
+            'mx-auto w-full space-y-6 outline-none',
+            view === 'board' ? 'max-w-7xl' : 'max-w-5xl',
+          )}
+        >
           <ViewSwitcher value={view} onChange={setView} />
 
           <p role="status" aria-live="polite" className="text-base text-muted-foreground">
@@ -199,7 +221,10 @@ export default function App() {
                   onToday={() => {
                     setMonthOverride(monthOf(today))
                     setSelectedDate(today)
+                    setFocusCalendarHeading(true)
                   }}
+                  focusHeading={focusCalendarHeading}
+                  onHeadingFocused={onHeadingFocused}
                   filtersActive={filtersActive}
                   onClearFilters={clearFilters}
                   onSelect={openDetail}
@@ -237,7 +262,9 @@ export default function App() {
           ) : null}
         </main>
 
-        <SiteFooter />
+        <div className="mx-auto w-full max-w-5xl">
+          <SiteFooter />
+        </div>
       </div>
 
       <ItemDetailsSheet
@@ -248,6 +275,7 @@ export default function App() {
         triggerRef={triggerRef}
         desktop={desktop}
       />
+     </OpeningsContext.Provider>
     </NowContext.Provider>
   )
 }

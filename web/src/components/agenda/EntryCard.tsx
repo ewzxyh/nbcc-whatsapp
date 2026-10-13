@@ -12,6 +12,7 @@ import {
   type AgendaEntry,
 } from '@/lib/agenda'
 import { openingInstant } from '@/lib/deadlines'
+import { useOpeningAt } from '@/hooks/useOpenings'
 import { assessmentKind } from '@/lib/share'
 import { progressKeyOf } from '@/lib/progress'
 
@@ -23,7 +24,8 @@ interface EntryCardProps {
 
 function EntryCardBase({ entry, showDate = false, onSelect }: EntryCardProps) {
   const kind = entry.kind === 'activity' ? assessmentKind(entry.title) : null
-  const openedAt = entry.kind === 'activity' ? openingInstant(entry.phases) : null
+  const knownOpening = useOpeningAt(entry.kind === 'activity' ? entry.activityId : null)
+  const openedAt = knownOpening ?? (entry.kind === 'activity' ? openingInstant(entry.phases) : null)
 
   return (
     <li>

@@ -26,6 +26,7 @@ import {
 } from '@/lib/agenda'
 import type { AgendaItem } from '@/lib/api'
 import { openingInstant } from '@/lib/deadlines'
+import { useOpeningAt } from '@/hooks/useOpenings'
 import { progressKeyOf } from '@/lib/progress'
 import { assessmentKind } from '@/lib/share'
 import { cn } from '@/lib/utils'
@@ -74,7 +75,8 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 function EntryDetails({ entry, allItems }: { entry: AgendaEntry; allItems: AgendaItem[] }) {
   const phases = phasesForEntry(entry, allItems)
   const kind = entry.kind === 'activity' ? assessmentKind(entry.title) : null
-  const openedAt = entry.kind === 'activity' ? openingInstant(phases) : null
+  const knownOpening = useOpeningAt(entry.kind === 'activity' ? entry.activityId : null)
+  const openedAt = knownOpening ?? (entry.kind === 'activity' ? openingInstant(phases) : null)
   const instructor = entry.kind === 'activity' ? entry.instructor : null
   const location = entry.kind === 'event' ? entry.item.location : null
 

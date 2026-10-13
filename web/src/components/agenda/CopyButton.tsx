@@ -12,25 +12,39 @@ const RESET_MS = 2500
 export function CopyButton({ entry }: { entry: AgendaEntry }) {
   const [state, setState] = useState<CopyState>('idle')
   const timer = useRef<number | undefined>(undefined)
+  const mounted = useRef(true)
 
-  useEffect(() => () => window.clearTimeout(timer.current), [])
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      window.clearTimeout(timer.current)
+    }
+  }, [])
 
   const onCopy = async () => {
     const ok = await copyText(formatCopyText(entry))
+    // The copy can finish after the sheet or card has closed; a late update must not start a timer.
+    if (!mounted.current) return
     setState(ok ? 'copied' : 'failed')
     window.clearTimeout(timer.current)
     timer.current = window.setTimeout(() => setState('idle'), RESET_MS)
   }
 
   return (
-    <>
-      <Button variant="outline" onClick={onCopy} className="min-w-0 flex-1 sm:flex-none">
+    <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-none">
+      <Button
+        variant="outline"
+        onClick={onCopy}
+        aria-label={`Copy details for ${entry.title}`}
+        className="min-w-0 w-full sm:w-auto"
+      >
         {state === 'copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
         {state === 'copied' ? 'Copied' : 'Copy details'}
       </Button>
-      <span role="status" className="sr-only">
-        {state === 'copied' ? 'Details copied to the clipboard.' : state === 'failed' ? 'Copy failed. Select the text and copy it manually.' : ''}
-      </span>
-    </>
+      <p role="status" className="text-sm text-muted-foreground empty:hidden">
+        {state === 'copied' ? 'Details copied to the clipboard.' : state === 'failed' ? 'Copy failed. Your browser blocked clipboard access; try again from the details panel.' : ''}
+      </p>
+    </div>
   )
 }

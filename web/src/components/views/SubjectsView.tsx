@@ -92,7 +92,10 @@ export default function SubjectsView({
         <p className="text-base text-muted-foreground">No professors listed yet</p>
       ) : (
         <Tabs value={activeTab} onValueChange={onTabChange} className="gap-6">
-          <TabsList className="h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
+          <TabsList
+            aria-label={group === 'subject' ? 'Subjects' : 'Professors'}
+            className="h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0"
+          >
             {tabs.map((definition) => (
               <TabsTrigger key={definition.value} value={definition.value} className={TAB_CLASS}>
                 {`${definition.label} (${definition.entries.length})`}

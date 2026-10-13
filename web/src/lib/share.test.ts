@@ -62,6 +62,8 @@ describe('assessmentKind', () => {
     expect(assessmentKind('Lab01')).toBe('Lab')
     expect(assessmentKind('Midterm exam')).toBe('Exam')
     expect(assessmentKind('Essay draft')).toBe('Essay')
+    expect(assessmentKind('Final Project Proposal')).toBe('Project')
+    expect(assessmentKind('Final exam')).toBe('Exam')
     expect(assessmentKind('Week 4 reading')).toBeNull()
   })
 })

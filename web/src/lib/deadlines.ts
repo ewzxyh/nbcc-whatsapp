@@ -1,5 +1,5 @@
 import type { AgendaItem, Phase } from './api'
-import { MONCTON_TIME_ZONE } from './agenda'
+import { addDays, MONCTON_TIME_ZONE } from './agenda'
 
 const MINUTE_MS = 60_000
 const HOUR_MS = 60 * MINUTE_MS
@@ -37,12 +37,12 @@ export function zonedInstant(date: string, hour: number, minute: number): number
 
 /**
  * The instant a phase takes effect. Timed items use their start time. All-day items open at the start of
- * the day, and due or closing items at the end of the day, so the countdown runs to the last minute.
+ * the day, and due or closing items at the end of the day (midnight at the close of that date).
  */
 export function itemInstant(item: AgendaItem): number {
   if (item.startAt && !item.allDay) return Date.parse(item.startAt)
   const endOfDay = item.type === 'activity' && item.phase !== 'available'
-  return endOfDay ? zonedInstant(item.date, 23, 59) : zonedInstant(item.date, 0, 0)
+  return endOfDay ? zonedInstant(addDays(item.date, 1), 0, 0) : zonedInstant(item.date, 0, 0)
 }
 
 /** The opening instant of an assessment, from its "available" phase when one is loaded. */
@@ -102,4 +102,13 @@ export function timeLeftShare(dueAt: number, now: number, openedAt: number | nul
 export function litSegments(share: number): number {
   if (share <= 0) return 0
   return Math.min(PROGRESS_SEGMENTS, Math.max(1, Math.ceil(share * PROGRESS_SEGMENTS)))
+}
+
+/** Opening instant for every assessment that has an "available" phase in the loaded items. */
+export function openingsByActivity(items: readonly AgendaItem[]): Map<string, number> {
+  const openings = new Map<string, number>()
+  for (const item of items) {
+    if (item.activityId && item.phase === 'available') openings.set(item.activityId, itemInstant(item))
+  }
+  return openings
 }

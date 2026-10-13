@@ -33,10 +33,10 @@ export function ViewSwitcher({ value, onChange }: ViewSwitcherProps) {
           <ToggleGroupItem
             key={id}
             value={id}
-            className="flex h-auto min-h-12 w-full min-w-0 flex-row items-center justify-center gap-2 rounded-xl border border-input bg-background px-2 py-2 text-base font-medium text-foreground transition-colors data-[state=off]:hover:bg-surface data-[state=on]:border-primary data-[state=on]:bg-accent data-[state=on]:text-accent-foreground sm:min-h-16 sm:flex-col sm:gap-1 sm:px-3"
+            className="flex h-auto min-h-16 w-full min-w-0 flex-col items-center justify-center gap-1 rounded-xl border border-input bg-background px-1 py-2 text-base font-medium text-foreground transition-colors data-[state=off]:hover:bg-surface data-[state=on]:border-2 data-[state=on]:border-primary data-[state=on]:bg-accent data-[state=on]:font-semibold data-[state=on]:text-accent-foreground"
           >
             <Icon aria-hidden="true" className="size-5" />
-            <span>{label}</span>
+            <span className="max-w-full truncate">{label}</span>
           </ToggleGroupItem>
         ))}
       </ToggleGroup>

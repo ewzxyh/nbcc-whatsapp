@@ -7,6 +7,7 @@ import {
   itemInstant,
   litSegments,
   openingInstant,
+  openingsByActivity,
   timeLeftShare,
   zonedInstant,
 } from './deadlines'
@@ -47,9 +48,9 @@ describe('itemInstant', () => {
     expect(itemInstant(item({}))).toBe(Date.parse('2026-10-14T23:59:00-03:00'))
   })
 
-  it('runs an all-day due date to the end of the day', () => {
+  it('runs an all-day due date to midnight at the end of its day', () => {
     const due = itemInstant(item({ allDay: true, startAt: null }))
-    expect(due).toBe(zonedInstant('2026-10-14', 23, 59))
+    expect(due).toBe(zonedInstant('2026-10-15', 0, 0))
   })
 
   it('opens an all-day available phase at the start of the day', () => {
@@ -116,5 +117,18 @@ describe('time-left meter', () => {
     const phases = [item({ phase: 'due' }), item({ phase: 'available', startAt: '2026-10-01T09:00:00-03:00' })]
     expect(openingInstant(phases)).toBe(Date.parse('2026-10-01T09:00:00-03:00'))
     expect(openingInstant([item({ phase: 'due' })])).toBeNull()
+  })
+})
+
+describe('openingsByActivity', () => {
+  it('maps each assessment to its opening instant, including hidden past phases', () => {
+    const items = [
+      item({ id: 'o', phase: 'available', activityId: 'a1', date: '2026-10-01', startAt: null, allDay: true }),
+      item({ id: 'd', phase: 'due', activityId: 'a1' }),
+      item({ id: 'x', phase: 'due', activityId: 'a2' }),
+    ]
+    const openings = openingsByActivity(items)
+    expect(openings.get('a1')).toBe(zonedInstant('2026-10-01', 0, 0))
+    expect(openings.has('a2')).toBe(false)
   })
 })

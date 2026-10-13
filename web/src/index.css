@@ -79,7 +79,7 @@
   --ring: #1d4ed8;
   --surface: #f8fafc;
   --today: #fbf7ee;
-  --today-border: #e7d9b5;
+  --today-border: #b08030;
   --progress-1: #b91c1c;
   --progress-2: #c2410c;
   --progress-3: #a16207;
@@ -146,6 +146,14 @@
   }
   :focus-visible {
     outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Focus rings are box shadows, which high-contrast modes drop. Restore a visible outline there. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight !important;
     outline-offset: 2px;
   }
 }

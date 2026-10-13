@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { EntryCard } from '@/components/agenda/EntryCard'
 import { EmptyAgenda } from '@/components/agenda/AgendaStates'
@@ -29,6 +29,9 @@ interface CalendarViewProps {
   filtersActive: boolean
   onClearFilters: () => void
   onSelect: (entry: AgendaEntry, trigger: HTMLElement) => void
+  /** Moves focus to the month heading after the user changes month, because the previous control may be unmounted while loading. */
+  focusHeading: boolean
+  onHeadingFocused: () => void
 }
 
 interface DayButtonProps {
@@ -79,7 +82,15 @@ export default function CalendarView({
   filtersActive,
   onClearFilters,
   onSelect,
+  focusHeading,
+  onHeadingFocused,
 }: CalendarViewProps) {
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (!focusHeading) return
+    headingRef.current?.focus()
+    onHeadingFocused()
+  }, [focusHeading, onHeadingFocused])
   const counts = useMemo(() => countByDate(items), [items])
   const weeks = useMemo(() => monthGrid(month), [month])
   const dayEntries = useMemo(
@@ -91,7 +102,7 @@ export default function CalendarView({
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl font-semibold text-foreground">{monthTitle}</h2>
+        <h2 ref={headingRef} tabIndex={-1} className="rounded-md text-2xl font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">{monthTitle}</h2>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" aria-label="Previous month" onClick={onPreviousMonth} className="px-3">
             <ChevronLeft aria-hidden="true" />
