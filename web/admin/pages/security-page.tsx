@@ -61,7 +61,8 @@ export function SecurityPage() {
     setPasswordOutcome(null)
     try {
       const result = await api.changePassword(values.currentPassword, values.newPassword)
-      completeAuth(result)
+      // The password response carries only the rotated token. The e-mail stays the one already in the session.
+      completeAuth({ ...result, email })
       passwordForm.reset()
       setPasswordOutcome({
         tone: 'success',
