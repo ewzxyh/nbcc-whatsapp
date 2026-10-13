@@ -3,6 +3,7 @@ import { EmptyAgenda } from '@/components/agenda/AgendaStates'
 import { EntryCard } from '@/components/agenda/EntryCard'
 import { ChoiceGroup } from '@/components/app/ChoiceGroup'
 import { formatCount, subjectColumns, timingColumns, type AgendaEntry } from '@/lib/agenda'
+import { cn } from '@/lib/utils'
 
 export type BoardGroup = 'timing' | 'subject'
 
@@ -48,14 +49,17 @@ export default function BoardView({
       {entries.length === 0 ? (
         <EmptyAgenda filtersActive={filtersActive} onClearFilters={onClearFilters} />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(100%,17rem),1fr))] gap-4">
           {columns.map((column, index) => {
             const headingId = `board-column-${index}`
             return (
               <section
                 key={column.id}
                 aria-labelledby={headingId}
-                className="flex min-w-0 flex-col gap-3 rounded-2xl border border-border bg-surface p-3"
+                className={cn(
+                  'flex min-w-0 flex-col gap-3 rounded-2xl border p-3',
+                  column.id === 'today' ? 'border-today-border bg-today' : 'border-border bg-surface',
+                )}
               >
                 <div className="flex items-start justify-between gap-2 px-1">
                   <div className="min-w-0">

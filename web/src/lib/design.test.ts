@@ -13,7 +13,7 @@ function readTokens(): Record<string, string> {
   const root = css.match(/:root\s*\{([^}]*)\}/)
   if (!root) throw new Error('No :root block in index.css')
   const tokens: Record<string, string> = {}
-  for (const [, name, value] of root[1].matchAll(/--([a-z-]+):\s*(#[0-9a-fA-F]{6});/g)) {
+  for (const [, name, value] of root[1].matchAll(/--([a-z0-9-]+):\s*(#[0-9a-fA-F]{6});/g)) {
     tokens[name] = value.toLowerCase()
   }
   return tokens
@@ -51,6 +51,19 @@ describe('palette contrast', () => {
     ['ring', 'surface', 3],
     ['input', 'background', 3],
     ['input', 'surface', 3],
+    ['foreground', 'today', 4.5],
+    ['muted-foreground', 'today', 4.5],
+    ['foreground', 'card', 4.5],
+    ['muted-foreground', 'card', 4.5],
+    ['primary', 'card', 4.5],
+    ['accent-foreground', 'accent', 4.5],
+    ['progress-1', 'card', 3],
+    ['progress-2', 'card', 3],
+    ['progress-3', 'card', 3],
+    ['progress-4', 'card', 3],
+    ['progress-5', 'card', 3],
+    ['progress-track', 'card', 3],
+    ['progress-track', 'today', 3],
   ]
 
   it('defines every token used in the pairs', () => {

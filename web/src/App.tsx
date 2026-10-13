@@ -1,17 +1,18 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleAlert, Info, RefreshCw } from 'lucide-react'
 import { ItemDetailsSheet } from '@/components/agenda/ItemDetailsSheet'
+import { cn } from '@/lib/utils'
 import { AgendaSkeleton } from '@/components/agenda/AgendaStates'
 import { AppHeader } from '@/components/app/AppHeader'
 import { FilterPanel } from '@/components/app/FilterPanel'
 import { SearchField } from '@/components/app/SearchField'
 import { SiteFooter } from '@/components/app/SiteFooter'
 import { ViewSwitcher, type ViewId } from '@/components/app/ViewSwitcher'
-import ListView from '@/components/views/ListView'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { useAgenda } from '@/hooks/useAgenda'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { NowContext, useMinuteClock } from '@/hooks/useNow'
 import {
   applyFilters,
   deriveProfessors,
@@ -33,12 +34,11 @@ const SubjectsView = lazy(() => import('@/components/views/SubjectsView'))
 const BoardView = lazy(() => import('@/components/views/BoardView'))
 
 const NO_ITEMS: AgendaItem[] = []
+const NO_SELECTION: string[] = []
 
 export default function App() {
-  const [view, setView] = useState<ViewId>('list')
+  const [view, setView] = useState<ViewId>('subjects')
   const [query, setQuery] = useState('')
-  const [subjects, setSubjects] = useState<string[]>([])
-  const [professors, setProfessors] = useState<string[]>([])
   const [showCampus, setShowCampus] = useState(true)
   const [showPast, setShowPast] = useState(false)
   const [subjectsGroup, setSubjectsGroup] = useState<SubjectsGroup>('subject')
@@ -51,6 +51,7 @@ export default function App() {
   const [detailOpen, setDetailOpen] = useState(false)
   const triggerRef = useRef<HTMLElement | null>(null)
   const desktop = useMediaQuery('(min-width: 768px)')
+  const now = useMinuteClock()
 
   const defaultQuery = useAgenda(undefined, revision)
   const today = defaultQuery.data?.today ?? ''
@@ -61,8 +62,8 @@ export default function App() {
   const calendarItemsAll = calendarQuery.data?.items ?? NO_ITEMS
 
   const filters = useMemo(
-    () => ({ query, subjects, instructors: professors, showCampus, showPast }),
-    [query, subjects, professors, showCampus, showPast],
+    () => ({ query, subjects: NO_SELECTION, instructors: NO_SELECTION, showCampus, showPast }),
+    [query, showCampus, showPast],
   )
   const filteredItems = useMemo(() => applyFilters(allItems, filters, today), [allItems, filters, today])
   const entries = useMemo(() => groupEntries(filteredItems), [filteredItems])
@@ -71,24 +72,16 @@ export default function App() {
     [calendarItemsAll, filters, today],
   )
 
-  // Facets ignore the subject and professor selections so badges stay visible to switch between.
-  const facetEntries = useMemo(
-    () =>
-      groupEntries(
-        applyFilters(allItems, { ...filters, subjects: [], instructors: [] }, today),
-      ),
-    [allItems, filters, today],
-  )
-  const subjectFacets = useMemo(() => deriveSubjects(facetEntries, subjects), [facetEntries, subjects])
-  const professorFacets = useMemo(() => deriveProfessors(facetEntries, professors), [facetEntries, professors])
-  const catalogHasSubjects = useMemo(() => allItems.some((item) => item.course !== null), [allItems])
+  // Subject and professor tabs live in the Subjects view, so their facets come from the entries that the other filters keep.
+  const subjectFacets = useMemo(() => deriveSubjects(entries, NO_SELECTION), [entries])
+  const professorFacets = useMemo(() => deriveProfessors(entries, NO_SELECTION), [entries])
   const catalogHasProfessors = useMemo(() => allItems.some((item) => item.instructor !== null), [allItems])
 
-  const filtersActive = query.trim() !== '' || subjects.length > 0 || professors.length > 0
+  const filtersActive = query.trim() !== '' || !showCampus || showPast
   const clearFilters = useCallback(() => {
     setQuery('')
-    setSubjects([])
-    setProfessors([])
+    setShowCampus(true)
+    setShowPast(false)
   }, [])
 
   const openDetail = useCallback((entry: AgendaEntry, trigger: HTMLElement) => {
@@ -127,10 +120,9 @@ export default function App() {
   const hasData = isCalendar ? month !== null && calendarQuery.data !== undefined : defaultQuery.data !== undefined
   const activeData = isCalendar ? calendarQuery.data : defaultQuery.data
   const omittedNotice = hasData ? omittedEventsNotice(activeData?.omittedEvents) : null
-  const now = Date.now()
 
   return (
-    <>
+    <NowContext.Provider value={now}>
       <a
         href="#agenda"
         className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-xl focus:bg-primary focus:px-4 focus:py-3 focus:text-base focus:font-medium focus:text-primary-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
@@ -138,7 +130,12 @@ export default function App() {
         Skip to agenda
       </a>
 
-      <div className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 md:py-8">
+      <div
+        className={cn(
+          'mx-auto flex min-h-dvh w-full flex-col gap-6 px-4 py-6 sm:px-6 md:py-8',
+          view === 'board' ? 'max-w-7xl' : 'max-w-5xl',
+        )}
+      >
         <AppHeader
           updatedAt={defaultQuery.data?.updatedAt}
           now={now}
@@ -149,14 +146,6 @@ export default function App() {
         <section aria-label="Search and filters" className="space-y-6 rounded-2xl border border-border p-4 sm:p-5">
           <SearchField value={query} onChange={setQuery} />
           <FilterPanel
-            subjects={subjectFacets}
-            catalogHasSubjects={catalogHasSubjects}
-            selectedSubjects={subjects}
-            onSubjectsChange={setSubjects}
-            professors={professorFacets}
-            catalogHasProfessors={catalogHasProfessors}
-            selectedProfessors={professors}
-            onProfessorsChange={setProfessors}
             showCampus={showCampus}
             onShowCampusChange={setShowCampus}
             showPast={showPast}
@@ -198,15 +187,6 @@ export default function App() {
             <AgendaSkeleton />
           ) : hasData ? (
             <Suspense fallback={<AgendaSkeleton />}>
-              {view === 'list' && (
-                <ListView
-                  entries={entries}
-                  today={today}
-                  filtersActive={filtersActive}
-                  onClearFilters={clearFilters}
-                  onSelect={openDetail}
-                />
-              )}
               {view === 'calendar' && month && (
                 <CalendarView
                   month={month}
@@ -268,6 +248,6 @@ export default function App() {
         triggerRef={triggerRef}
         desktop={desktop}
       />
-    </>
+    </NowContext.Provider>
   )
 }

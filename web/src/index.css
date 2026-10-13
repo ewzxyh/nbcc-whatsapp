@@ -78,6 +78,14 @@
   --input: #64748b;
   --ring: #1d4ed8;
   --surface: #f8fafc;
+  --today: #fbf7ee;
+  --today-border: #e7d9b5;
+  --progress-1: #b91c1c;
+  --progress-2: #c2410c;
+  --progress-3: #a16207;
+  --progress-4: #4d7c0f;
+  --progress-5: #15803d;
+  --progress-track: #64748b;
   --radius: 0.875rem;
 }
 
@@ -105,6 +113,14 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-surface: var(--surface);
+  --color-today: var(--today);
+  --color-today-border: var(--today-border);
+  --color-progress-1: var(--progress-1);
+  --color-progress-2: var(--progress-2);
+  --color-progress-3: var(--progress-3);
+  --color-progress-4: var(--progress-4);
+  --color-progress-5: var(--progress-5);
+  --color-progress-track: var(--progress-track);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: 0.625rem;
   --radius-lg: var(--radius);
@@ -115,6 +131,10 @@
 @layer base {
   * {
     @apply border-border;
+  }
+  html {
+    /* Reserves the scrollbar gutter so switching views never shifts the layout sideways. */
+    scrollbar-gutter: stable;
   }
   body {
     @apply bg-background font-sans text-foreground antialiased;
