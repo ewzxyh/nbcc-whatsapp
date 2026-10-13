@@ -20,10 +20,11 @@ func sampleAgendaFeed() string {
 
 func sampleAgendaEvents() []string {
 	const lab = "Sample I: Sample Fundamentals"
+	const description = "DESCRIPTION:https://elearning.nbcc.ca/d2l/?ou=111111&db=333333\r\n"
 	return []string{
-		agendaEvent("uid-0001@test.invalid", "Sample Lab 01 - Available", lab, ":20261013T130000Z", ""),
-		agendaEvent("uid-0002@test.invalid", "Sample Lab 01 - Due", lab, ";TZID=America/Halifax:20261020T235900", ""),
-		agendaEvent("uid-0003@test.invalid", "Sample Lab 01 - Availability Ends", lab, ";VALUE=DATE:20261021", ""),
+		agendaEvent("uid-0001@test.invalid", "Sample Lab 01 - Available", lab, ":20261013T130000Z", description),
+		agendaEvent("uid-0002@test.invalid", "Sample Lab 01 - Due", lab, ";TZID=America/Halifax:20261020T235900", description),
+		agendaEvent("uid-0003@test.invalid", "Sample Lab 01 - Availability Ends", lab, ";VALUE=DATE:20261021", description),
 		agendaEvent("uid-0004@test.invalid", "Quiz Special Access: Sample Quiz 02 - Due", lab, ";TZID=America/Halifax:20261027T170000", "DESCRIPTION:Sample quiz notes: https://elearning.nbcc.ca/d2l/lms/quizzing/quizzing.d2l?ou=111111&amp;qi=222222\r\n"),
 		agendaEvent("uid-0005@test.invalid", "Sample Career Fair", "Sample Campus - Library (New Brunswick Community College)", ";TZID=America/Halifax:20261015T123000", "DTEND;TZID=America/Halifax:20261015T133000\r\nDESCRIPTION:Sample description text https://example.invalid/private\r\n"),
 		agendaEvent("uid-0006@test.invalid", "Sample Virtual Session", "https://example.invalid/meet/sample", ";TZID=America/Halifax:20261016T090000", "DESCRIPTION:Sample join notes\r\n"),

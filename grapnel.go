@@ -74,6 +74,42 @@ type Group struct {
 	CanSend *bool  `json:"owner_can_send_message,omitempty"`
 }
 
+type groupMessage struct {
+	ID        string `json:"messageid"`
+	ChatID    string `json:"chatid"`
+	IsGroup   bool   `json:"isGroup"`
+	FromMe    *bool  `json:"fromMe"`
+	Text      string `json:"text"`
+	Timestamp int64  `json:"messageTimestamp"`
+}
+
+type messagePage struct {
+	Messages   []groupMessage `json:"messages"`
+	Pagination *struct {
+		HasMore    bool `json:"has_more"`
+		NextOffset int  `json:"next_offset"`
+	} `json:"pagination"`
+}
+
+func (a *App) groupMessages(ctx context.Context, s Settings, limit, offset int) (messagePage, error) {
+	var page messagePage
+	path := "/instances/" + s.GrapnelInstanceID + "/groups/messages?groupjid=" + url.QueryEscape(s.GrapnelGroupJID) + "&limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+	if err := a.api(ctx, s, "GET", path, nil, "", &page); err != nil {
+		return page, err
+	}
+	if page.Messages == nil || page.Pagination == nil || len(page.Messages) > limit || page.Pagination.HasMore && (len(page.Messages) == 0 || page.Pagination.NextOffset <= offset || page.Pagination.NextOffset > 100000) {
+		return messagePage{}, errors.New("invalid Grapnel pagination")
+	}
+	seen := map[string]bool{}
+	for _, m := range page.Messages {
+		if m.ID == "" || len(m.ID) > 255 || m.ChatID != s.GrapnelGroupJID || !m.IsGroup || m.FromMe == nil || seen[m.ID] || m.Timestamp < 0 {
+			return messagePage{}, errors.New("invalid Grapnel group history")
+		}
+		seen[m.ID] = true
+	}
+	return page, nil
+}
+
 func groupName(s string) string {
 	return strings.Join(strings.Fields(strings.TrimFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })), " ")
 }
@@ -109,7 +145,8 @@ func (a *App) discover(ctx context.Context, s Settings) (Group, error) {
 }
 
 func (a *App) sendText(ctx context.Context, s Settings, text, key string) error {
-	if !s.SendEnabled {
+	current := a.settings.current()
+	if !s.SendEnabled || !current.SendEnabled || current.GrapnelAPIKey != s.GrapnelAPIKey || deliveryTarget(current, a.settings.key) != deliveryTarget(s, a.settings.key) {
 		return errors.New("sending is disabled")
 	}
 	if len(utf16.Encode([]rune(text))) > 4096 {

@@ -193,6 +193,12 @@ export function WhatsAppPage() {
           <p className="text-base text-muted-foreground">
             Com o envio desligado, o serviço só acompanha o calendário. Nenhuma mensagem é enviada ao grupo.
           </p>
+          <p className="text-sm text-muted-foreground">
+            Ao ligar, envia a agenda atual e acompanha mudanças nas próximas duas semanas.
+            O comando #NBCC tem intervalo de 15 minutos e evita repetir uma agenda sem mudanças
+            que ainda esteja nas últimas cinco mensagens da conversa. Os lembretes de entrega
+            são enviados a 14h e 4h do prazo, mesmo sem mudança no calendário.
+          </p>
           <Controller
             control={control}
             name="sendEnabled"
@@ -303,7 +309,7 @@ export function WhatsAppPage() {
         open={confirmSend}
         onOpenChange={setConfirmSend}
         title="Ligar o envio para o grupo?"
-        description="Depois que você salvar, o serviço poderá enviar mensagens reais do WhatsApp para o grupo. Confira o grupo e as configurações antes de salvar."
+        description="Depois que você salvar, o serviço enviará a agenda atual e poderá enviar atualizações e lembretes reais do WhatsApp para o grupo. Confira o grupo e as configurações antes de salvar."
         confirmLabel="Ligar envio"
         onConfirm={() => setValue('sendEnabled', true, { shouldDirty: true })}
       />

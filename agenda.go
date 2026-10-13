@@ -376,7 +376,7 @@ func (b *agendaBuilder) process(r rawEvent) error {
 		return nil
 	}
 	description, _ := e.Props.Text(ical.PropDescription)
-	identity := activityIdentity(r.name, description)
+	identity := activityIdentity(uid, description)
 	course, courseTitle, _ := strings.Cut(agendaURLPattern.ReplaceAllString(html.UnescapeString(location), " "), ":")
 	recurring := e.Props.Get(ical.PropRecurrenceRule) != nil
 	label := phaseLabels[r.phase]

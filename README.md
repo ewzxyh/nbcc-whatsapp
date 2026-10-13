@@ -7,18 +7,23 @@ A Go service that reads a private NBCC Brightspace calendar feed, formats an Eng
 ## Behavior
 
 - Checks the calendar every `pollIntervalMinutes` (default 5) for event changes.
-- The first fetch establishes a baseline without sending a message.
-- Ignores regenerated `DTSTAMP` values and event ordering when comparing feeds.
+- While sending is off, establishes and updates a baseline. Enabling sending queues the current agenda.
+- Compares the activities actually displayed, ignoring regenerated timestamps, event order, campus events and changes outside the window. Activities entering or leaving the window at midnight are changes too.
 - Lists academic deadlines, availability starts, and availability ends from **today through today + 14 days, inclusive**, using `America/Halifax`.
 - Groups the agenda by date and prefixes today's date with **`(TODAY)`**.
-- Combines deadline and closing events for the same assessment. General campus events are omitted.
-- Handles incoming **`#NBCC`** commands in the configured group by fetching a fresh agenda.
+- Combines phases only when an assessment identifier is available. Otherwise keeps distinct event UIDs separate. General campus events are omitted; malformed campus events follow the same omission policy as the public agenda, and malformed course activities block sending.
+- Uses WhatsApp bold for courses, titles and dates. A near deadline adds, for example, `⚠️ *_14 hours left_*` before its title.
+- Handles **`#NBCC`** in the configured group by fetching a fresh agenda. After an accepted agenda, commands from anyone are ignored for 15 minutes; ignored commands are never replayed. A pending response also suppresses additional commands.
+- After that cooldown, an unchanged agenda is suppressed if its last part is still among the conversation's five most recent messages, including participants' messages. The provider history is checked before suppression; a failed history lookup is retried rather than assuming the agenda has disappeared.
+- Sends deadline reminders at **14 hours** and **4 hours** before **Due**, independently of feed changes and the ordinary cooldown/recent-message suppression. Date-only deadlines use 23:59:59 of that local date. Countdown labels show the remaining time when the message is prepared.
+- Reminder stages and command cooldowns survive restarts. After downtime, sends the most urgent applicable reminder, combining simultaneous deadlines into one agenda; expired deadlines are never reminded. A changed due date has its own reminder stages.
+- Receives other participants' commands by signed webhook. Polls Grapnel history every minute to also detect commands from the connected number, without replaying commands predating activation. Messages need a provider timestamp for history-based command detection.
 - Persists queued work and event IDs, validates signed webhooks, and uses stable idempotency keys for retries.
 - Splits long agendas into messages within Grapnel's 4096 UTF-16 character limit.
 
-When sending is disabled, notifications are not queued and commands are suppressed. Suppressed commands are not replayed after sending is enabled.
+When sending is disabled, notifications are not queued, pending work is canceled and commands are suppressed. Suppressed commands and canceled message parts are not replayed after enabling. The setting and destination are checked before every message part; an HTTP request already in flight may still complete.
 
-Any event change in the feed can trigger a notification, including changes outside the displayed window. The passage of a day alone does not trigger a notification; `#NBCC` always recalculates the current window.
+New visible activity content supersedes older pending notifications, including retries and incomplete batches. Every outgoing agenda is revalidated against a fresh feed before sending. Retries of unchanged work keep exactly the same body and idempotency key for each part.
 
 Changing the feed URL compares the new feed with the stored baseline, so a different calendar can trigger one notification at the next check when sending is enabled.
 
@@ -154,7 +159,7 @@ Preserve the raw request body and `X-Grapnel-*` headers. After HTTPS works, regi
 
 The receiver validates HMAC SHA-256 over `timestamp + "." + raw_body` with the saved `webhookSecret`, matches the event ID, and rejects timestamps more than five minutes from the current time. Only the configured instance, group and command are processed. Changing `webhookSecret` takes effect immediately, so update the registration with Grapnel as well if the secret changes.
 
-Grapnel forwards incoming messages from other participants (`fromMe:false`). A `#NBCC` command sent by the connected WhatsApp number itself does not trigger this webhook.
+Grapnel forwards incoming messages from other participants (`fromMe:false`). Commands from the connected number are detected through the group-history API within about one minute, subject to provider history availability.
 
 ## Enable sending
 

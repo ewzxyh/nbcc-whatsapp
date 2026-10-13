@@ -69,6 +69,8 @@ type fakeUpstream struct {
 	webhookRegistered int
 	posts             int
 	keys              []string
+	messages          []groupMessage
+	sent              []string
 	hook              func(*http.Request) (*http.Response, bool)
 }
 
@@ -117,9 +119,22 @@ func (u *fakeUpstream) RoundTrip(r *http.Request) (*http.Response, error) {
 	if strings.HasSuffix(r.URL.Path, "/groups") {
 		return testResponse(200, u.groups), nil
 	}
+	if strings.HasSuffix(r.URL.Path, "/groups/messages") {
+		messages := u.messages
+		if messages == nil {
+			messages = []groupMessage{}
+		}
+		b, _ := json.Marshal(map[string]any{"messages": messages, "pagination": map[string]any{"has_more": false}})
+		return testResponse(200, string(b)), nil
+	}
 	if r.Method == http.MethodPost {
 		u.posts++
 		u.keys = append(u.keys, r.Header.Get("Idempotency-Key"))
+		var body struct {
+			Text string `json:"text"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		u.sent = append(u.sent, body.Text)
 		return testResponse(202, `{"accepted":true}`), nil
 	}
 	return testResponse(404, ""), nil
