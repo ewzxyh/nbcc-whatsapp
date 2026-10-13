@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+private/
+data/
+*.exe
+nbcc-whatsapp
+*-verification.json
+message-example.txt
+*.ics
+*.zip
+*.pem
+*.key
+*.p12
+*.pfx

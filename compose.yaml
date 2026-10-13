@@ -1,0 +1,20 @@
+services:
+  nbcc:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${NBCC_BIND_PORT:-8080}:8080"
+    volumes:
+      - nbcc-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, /nbcc, -healthcheck]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  nbcc-data:

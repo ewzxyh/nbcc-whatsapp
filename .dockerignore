@@ -1,0 +1,11 @@
+.env
+.env.*
+.git
+private
+data
+*.exe
+*.png
+*-verification.json
+message-example.txt
+*.ics
+*.zip
