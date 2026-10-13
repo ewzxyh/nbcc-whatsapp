@@ -62,23 +62,9 @@ func (s *Store) copyState(now time.Time) diskState {
 }
 
 func (s *Store) save(next diskState) error {
-	f, err := os.CreateTemp(filepath.Dir(s.path), ".state-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if err = f.Chmod(0600); err == nil {
-		err = json.NewEncoder(f).Encode(next)
-	}
+	b, err := json.Marshal(next)
 	if err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = os.Rename(f.Name(), s.path)
+		err = writeFileAtomic(s.path, b)
 	}
 	if err == nil {
 		s.data = next
@@ -148,6 +134,21 @@ func (s *Store) pending(now time.Time) []Job {
 		jobs = jobs[:20]
 	}
 	return jobs
+}
+
+// counts returns the number of pending and failed jobs for the admin status.
+func (s *Store) counts() (pending, failed int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.data.Jobs {
+		switch j.Status {
+		case "pending":
+			pending++
+		case "failed":
+			failed++
+		}
+	}
+	return pending, failed
 }
 
 func (s *Store) update(job Job, now time.Time) error {

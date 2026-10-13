@@ -4,42 +4,98 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type App struct {
-	cfg    Config
-	client *http.Client
-	store  *Store
-	now    func() time.Time
+	cfg      Config
+	client   *http.Client
+	store    *Store
+	settings *SettingsStore
+	admin    *AdminStore
+	audit    *auditLog
+	sessions *sessionStore
+	limiter  *attemptLimiter
+	status   *runtimeStatus
+	now      func() time.Time
+	feed     feedCache
+	// onPollTicker is a test hook, called whenever the worker creates its poll ticker.
+	onPollTicker func(time.Duration)
 }
 
-func (a *App) preview(ctx context.Context) (Preview, error) {
-	r, err := http.NewRequestWithContext(ctx, "GET", a.cfg.FeedURL, nil)
+// runtimeStatus holds the most recent outcomes shown in the admin status. Only generic codes are stored.
+type runtimeStatus struct {
+	mu            sync.Mutex
+	lastCheckAt   time.Time
+	feedErr       string
+	sendErr       string
+	agendaOmitted []omittedEvent // omissions of the most recent default-window build
+	agendaErr     string
+}
+
+func (r *runtimeStatus) recordCheck(at time.Time, code string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lastCheckAt = at
+	r.feedErr = code
+}
+
+func (r *runtimeStatus) recordSend(code string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sendErr = code
+}
+
+func (r *runtimeStatus) snapshot() (time.Time, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	code := r.feedErr
+	if code == "" {
+		code = r.sendErr
+	}
+	return r.lastCheckAt, code
+}
+
+// fetchFeed returns the raw upstream feed. Errors are generic and never include the feed URL.
+func (a *App) fetchFeed(ctx context.Context, feedURL string) ([]byte, error) {
+	if feedURL == "" {
+		return nil, errors.New("NBCC feed is not configured")
+	}
+	r, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
 	if err != nil {
-		return Preview{}, errors.New("invalid NBCC feed URL")
+		return nil, errors.New("invalid NBCC feed URL")
 	}
 	r.Header.Set("Accept", "text/calendar")
 	res, err := a.client.Do(r)
 	if err != nil {
-		return Preview{}, errors.New("NBCC feed network error")
+		return nil, errors.New("NBCC feed network error")
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return Preview{}, errors.New("NBCC feed is unavailable")
+		return nil, errors.New("NBCC feed is unavailable")
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, (8<<20)+1))
 	if err != nil || len(raw) > 8<<20 {
-		return Preview{}, errors.New("NBCC feed cannot be read or is too large")
+		return nil, errors.New("NBCC feed cannot be read or is too large")
+	}
+	return raw, nil
+}
+
+func (a *App) preview(ctx context.Context, s Settings) (Preview, error) {
+	raw, err := a.fetchFeed(ctx, s.NBCCFeedURL)
+	if err != nil {
+		return Preview{}, err
 	}
 	return buildPreview(raw, a.now())
 }
@@ -51,50 +107,128 @@ func jsonResponse(w http.ResponseWriter, status int, body any) {
 	json.NewEncoder(w).Encode(body)
 }
 
-func (a *App) admin(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+a.cfg.AdminToken)) != 1 {
-			jsonResponse(w, 401, map[string]string{"error": "unauthorized"})
+var uiSecurityHeaders = map[string]string{
+	"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+	"X-Content-Type-Options":  "nosniff",
+	"Referrer-Policy":         "no-referrer",
+	"X-Frame-Options":         "DENY",
+}
+
+func setUISecurityHeaders(w http.ResponseWriter) {
+	for name, value := range uiSecurityHeaders {
+		w.Header().Set(name, value)
+	}
+}
+
+// serveStatic serves one regular file from files. Only regular files are served; there are no directory listings.
+func serveStatic(w http.ResponseWriter, r *http.Request, files fs.FS, name, cacheControl string) {
+	if !fs.ValidPath(name) {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := files.Open(name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	content, seekable := f.(io.ReadSeeker)
+	if err != nil || info.IsDir() || !seekable {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", cacheControl)
+	http.ServeContent(w, r, name, info.ModTime(), content)
+}
+
+// ui serves the built public React app from WEB_DIR.
+func (a *App) ui() http.Handler {
+	files := os.DirFS(a.cfg.WebDir)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setUISecurityHeaders(w)
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		if name == "" {
+			name = "index.html"
+		}
+		cache := "no-cache"
+		if strings.HasPrefix(name, "assets/") {
+			cache = "public, max-age=31536000, immutable"
+		}
+		serveStatic(w, r, files, name, cache)
+	})
+}
+
+// adminUI serves admin/index.html for /admin and every /admin/... path except /admin/assets/.
+func (a *App) adminUI() http.Handler {
+	files := os.DirFS(a.cfg.WebDir)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setUISecurityHeaders(w)
+		rest := strings.TrimPrefix(r.URL.Path, "/admin")
+		if rest == "/assets" || strings.HasPrefix(rest, "/assets/") {
+			http.NotFound(w, r)
 			return
 		}
-		next(w, r)
-	}
+		serveStatic(w, r, files, "admin/index.html", "no-cache")
+	})
+}
+
+func isAPIPath(p string) bool {
+	return p == "/api" || strings.HasPrefix(p, "/api/") || p == "/webhooks" || strings.HasPrefix(p, "/webhooks/")
+}
+
+func isAdminPath(p string) bool {
+	return p == "/admin" || strings.HasPrefix(p, "/admin/")
 }
 
 func (a *App) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		jsonResponse(w, 200, map[string]any{"status": "ok", "send_enabled": a.cfg.SendEnabled})
+		jsonResponse(w, 200, map[string]any{"status": "ok", "send_enabled": a.settings.current().SendEnabled})
 	})
-	mux.HandleFunc("GET /api/preview", a.admin(func(w http.ResponseWriter, r *http.Request) {
-		p, err := a.preview(r.Context())
-		if err != nil {
-			jsonResponse(w, 502, map[string]string{"error": err.Error()})
-			return
-		}
-		jsonResponse(w, 200, p)
-	}))
-	mux.HandleFunc("GET /api/group", a.admin(func(w http.ResponseWriter, r *http.Request) {
-		g, err := a.discover(r.Context())
-		if err != nil {
-			jsonResponse(w, 502, map[string]string{"error": err.Error()})
-			return
-		}
-		jsonResponse(w, 200, g)
-	}))
-	mux.HandleFunc("POST /api/check", a.admin(func(w http.ResponseWriter, r *http.Request) {
-		changed, queued, err := a.check(r.Context())
-		if err != nil {
-			jsonResponse(w, 502, map[string]string{"error": err.Error()})
-			return
-		}
-		jsonResponse(w, 200, map[string]any{"feed_changed": changed, "queued": queued, "send_enabled": a.cfg.SendEnabled})
-	}))
+	mux.HandleFunc("GET /api/agenda", a.agenda)
 	mux.HandleFunc("POST /webhooks/grapnel", a.webhook)
-	return mux
+
+	mux.HandleFunc("GET /api/admin/session", a.adminSessionState)
+	mux.HandleFunc("POST /api/admin/setup", publicPost(a.setup))
+	mux.HandleFunc("POST /api/admin/login", publicPost(a.login))
+	mux.HandleFunc("POST /api/admin/logout", a.requireSession(a.logout))
+	mux.HandleFunc("POST /api/admin/session/extend", a.requireSession(a.extendSession))
+	mux.HandleFunc("GET /api/admin/status", a.requireSession(a.adminStatus))
+	mux.HandleFunc("GET /api/admin/settings", a.requireSession(a.getSettings))
+	mux.HandleFunc("PUT /api/admin/settings", a.requireSession(a.putSettings))
+	mux.HandleFunc("POST /api/admin/settings/test-feed", a.requireSession(a.testFeed))
+	mux.HandleFunc("POST /api/admin/settings/test-grapnel", a.requireSession(a.testGrapnel))
+	mux.HandleFunc("POST /api/admin/webhook/register", a.requireSession(a.registerWebhookAdmin))
+	mux.HandleFunc("GET /api/admin/courses", a.requireSession(a.courses))
+	mux.HandleFunc("POST /api/admin/check", a.requireSession(a.adminCheck))
+	mux.HandleFunc("GET /api/admin/preview", a.requireSession(a.adminPreview))
+	mux.HandleFunc("GET /api/admin/activity", a.requireSession(a.activity))
+	mux.HandleFunc("POST /api/admin/account/email", a.requireSession(a.changeEmail))
+	mux.HandleFunc("POST /api/admin/password", a.requireSession(a.changePassword))
+	mux.HandleFunc("POST /api/admin/sessions/revoke-others", a.requireSession(a.revokeOthers))
+
+	ui := a.ui()
+	adminUI := a.adminUI()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/admin") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		// Unmatched GET/HEAD requests outside /api and /webhooks go to the static UI; all others keep the mux's 404/405.
+		if _, pattern := mux.Handler(r); pattern == "" && (r.Method == http.MethodGet || r.Method == http.MethodHead) && !isAPIPath(r.URL.Path) {
+			if isAdminPath(r.URL.Path) {
+				adminUI.ServeHTTP(w, r)
+				return
+			}
+			ui.ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
+	s := a.settings.current()
 	r.Body = http.MaxBytesReader(w, r.Body, 512<<10)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -108,7 +242,12 @@ func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 401, map[string]string{"error": "expired signature"})
 		return
 	}
-	mac := hmac.New(sha256.New, []byte(a.cfg.WebhookSecret))
+	// With no secret configured, every signature is refused; an empty HMAC key must never verify.
+	if s.WebhookSecret == "" {
+		jsonResponse(w, 401, map[string]string{"error": "invalid signature"})
+		return
+	}
+	mac := hmac.New(sha256.New, []byte(s.WebhookSecret))
 	mac.Write([]byte(ts + "." + string(body)))
 	signature, err := hex.DecodeString(strings.TrimPrefix(r.Header.Get("X-Grapnel-Signature"), "sha256="))
 	if !strings.HasPrefix(r.Header.Get("X-Grapnel-Signature"), "sha256=") || err != nil || !hmac.Equal(signature, mac.Sum(nil)) {
@@ -131,27 +270,35 @@ func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 400, map[string]string{"error": "invalid webhook event"})
 		return
 	}
-	match := event.Event == "whatsapp.group.message.received" && event.InstanceID == a.cfg.InstanceID && event.Message.ChatID == a.cfg.GroupJID && event.Message.IsGroup && event.Message.FromMe != nil && !*event.Message.FromMe && event.Message.ID != "" && strings.EqualFold(strings.TrimSpace(event.Message.Text), "#NBCC")
+	match := event.Event == "whatsapp.group.message.received" && s.GrapnelInstanceID != "" && event.InstanceID == s.GrapnelInstanceID && s.GrapnelGroupJID != "" && event.Message.ChatID == s.GrapnelGroupJID && event.Message.IsGroup && event.Message.FromMe != nil && !*event.Message.FromMe && event.Message.ID != "" && strings.EqualFold(strings.TrimSpace(event.Message.Text), "#NBCC")
 	if match {
 		// Persist before acknowledgement. Disabled commands are suppressed, never replayed later.
-		if err = a.store.enqueue("event:"+event.ID, "", a.cfg.SendEnabled, a.now()); err != nil {
+		if err = a.store.enqueue("event:"+event.ID, "", s.SendEnabled, a.now()); err != nil {
 			jsonResponse(w, 503, map[string]string{"error": "cannot persist webhook"})
 			return
 		}
 	}
-	jsonResponse(w, 202, map[string]any{"received": true, "command_matched": match, "send_enabled": a.cfg.SendEnabled})
+	jsonResponse(w, 202, map[string]any{"received": true, "command_matched": match, "send_enabled": s.SendEnabled})
 }
 
+// check fetches the feed, updates the baseline and queues a notification when the feed changed and sending is enabled.
 func (a *App) check(ctx context.Context) (bool, bool, error) {
-	p, err := a.preview(ctx)
+	s := a.settings.current()
+	p, err := a.preview(ctx, s)
+	code := ""
+	if err != nil {
+		code = "feed_unavailable"
+	}
+	a.status.recordCheck(a.now(), code)
 	if err != nil {
 		return false, false, err
 	}
-	return a.store.observe(p, a.cfg.SendEnabled, a.now())
+	return a.store.observe(p, s.SendEnabled, a.now())
 }
 
 func (a *App) processPending(ctx context.Context) error {
-	if !a.cfg.SendEnabled {
+	s := a.settings.current()
+	if !s.SendEnabled {
 		return nil
 	}
 	for _, job := range a.store.pending(a.now()) {
@@ -164,10 +311,13 @@ func (a *App) processPending(ctx context.Context) error {
 			continue
 		}
 		var err error
+		failureCode := "grapnel_unavailable"
 		if job.Text == "" {
 			var p Preview
-			p, err = a.preview(ctx)
-			if err == nil {
+			p, err = a.preview(ctx, s)
+			if err != nil {
+				failureCode = "feed_unavailable"
+			} else {
 				job.Text = p.Text
 				if err = a.store.update(job, a.now()); err != nil {
 					return err
@@ -177,7 +327,7 @@ func (a *App) processPending(ctx context.Context) error {
 		if err == nil {
 			parts := messageParts(job.Text)
 			for job.NextPart < len(parts) {
-				err = a.sendText(ctx, parts[job.NextPart], job.ID+":p"+strconv.Itoa(job.NextPart))
+				err = a.sendText(ctx, s, parts[job.NextPart], job.ID+":p"+strconv.Itoa(job.NextPart))
 				if err != nil {
 					break
 				}
@@ -189,11 +339,13 @@ func (a *App) processPending(ctx context.Context) error {
 		}
 		job.Attempts++
 		if err == nil {
+			a.status.recordSend("")
 			job.Status = "accepted"
 			job.Text = ""
 		} else {
 			var apiErr *apiError
 			permanent := errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != 408 && apiErr.Status != 409 && apiErr.Status != 429
+			a.status.recordSend(failureCode)
 			if job.Attempts >= 8 || permanent {
 				job.Status = "failed"
 				job.Text = ""
@@ -212,17 +364,24 @@ func (a *App) processPending(ctx context.Context) error {
 	return nil
 }
 
+// runWorker polls the feed and drains the job queue. The poll ticker is recreated when pollIntervalMinutes changes.
 func (a *App) runWorker(ctx context.Context) {
-	poll := time.NewTicker(a.cfg.PollInterval)
-	defer poll.Stop()
 	jobs := time.NewTicker(time.Second)
 	defer jobs.Stop()
+	interval := a.settings.current().pollInterval()
+	poll := time.NewTicker(interval)
+	defer func() { poll.Stop() }()
+	a.pollTickerCreated(interval)
 	check := func() {
+		if !a.settings.current().feedConfigured() {
+			a.status.recordCheck(a.now(), "not_configured")
+			return
+		}
 		changed, queued, err := a.check(ctx)
 		if err != nil {
 			log.Printf("feed check: %v", err)
 		} else if changed {
-			log.Printf("feed changed; queued=%t send_enabled=%t", queued, a.cfg.SendEnabled)
+			log.Printf("feed changed; queued=%t send_enabled=%t", queued, a.settings.current().SendEnabled)
 		}
 	}
 	check()
@@ -230,6 +389,13 @@ func (a *App) runWorker(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-a.settings.changedCh():
+			if next := a.settings.current().pollInterval(); next != interval {
+				poll.Stop()
+				interval = next
+				poll = time.NewTicker(interval)
+				a.pollTickerCreated(interval)
+			}
 		case <-poll.C:
 			check()
 		case <-jobs.C:
@@ -237,5 +403,11 @@ func (a *App) runWorker(ctx context.Context) {
 				log.Printf("queue: %v", err)
 			}
 		}
+	}
+}
+
+func (a *App) pollTickerCreated(d time.Duration) {
+	if a.onPollTicker != nil {
+		a.onPollTicker(d)
 	}
 }

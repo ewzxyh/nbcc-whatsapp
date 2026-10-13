@@ -9,3 +9,5 @@ data
 message-example.txt
 *.ics
 *.zip
+web/node_modules
+web/dist

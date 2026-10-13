@@ -55,13 +55,41 @@ func eventTitle(title string) (string, string) {
 	return title, ""
 }
 
+func parseCalendar(raw []byte) (*ical.Calendar, error) {
+	cal, err := ical.NewDecoder(bytes.NewReader(bytes.TrimPrefix(raw, []byte{0xef, 0xbb, 0xbf}))).Decode()
+	if err != nil || cal == nil {
+		return nil, errors.New("invalid NBCC calendar")
+	}
+	return cal, nil
+}
+
+func activityIdentity(name, description string) string {
+	identity := name
+	for _, link := range nbccActivityLinks.FindAllString(description, -1) {
+		u, err := url.Parse(html.UnescapeString(link))
+		if err != nil {
+			continue
+		}
+		for _, field := range []string{"qi", "db"} {
+			if id := u.Query().Get(field); id != "" {
+				identity = field + ":" + u.Query().Get("ou") + ":" + id
+				break
+			}
+		}
+		if identity != name {
+			break
+		}
+	}
+	return identity
+}
+
 func buildPreview(raw []byte, now time.Time) (Preview, error) {
 	start := midnight(now)
 	end := start.AddDate(0, 0, 15) // Today through today+14, including the last day.
 	p := Preview{From: start.Format("2006-01-02"), Through: end.AddDate(0, 0, -1).Format("2006-01-02"), FetchedAt: now}
-	cal, err := ical.NewDecoder(bytes.NewReader(bytes.TrimPrefix(raw, []byte{0xef, 0xbb, 0xbf}))).Decode()
-	if err != nil || cal == nil {
-		return p, errors.New("invalid NBCC calendar")
+	cal, err := parseCalendar(raw)
+	if err != nil {
+		return p, err
 	}
 	seen := map[string]bool{}
 	var canonical []*ical.Component
@@ -94,23 +122,8 @@ func buildPreview(raw []byte, now time.Time) (Preview, error) {
 			return p, errors.New("invalid event location")
 		}
 		course, _, _ = strings.Cut(course, ":")
-		identity := name
 		description, _ := e.Props.Text(ical.PropDescription)
-		for _, link := range nbccActivityLinks.FindAllString(description, -1) {
-			u, err := url.Parse(html.UnescapeString(link))
-			if err != nil {
-				continue
-			}
-			for _, field := range []string{"qi", "db"} {
-				if id := u.Query().Get(field); id != "" {
-					identity = field + ":" + u.Query().Get("ou") + ":" + id
-					break
-				}
-			}
-			if identity != name {
-				break
-			}
-		}
+		identity := activityIdentity(name, description)
 		allDay := e.Props.Get(ical.PropDateTimeStart).ValueType() == ical.ValueDate
 		dates := []time.Time{date}
 		recurring := e.Props.Get(ical.PropRecurrenceRule) != nil

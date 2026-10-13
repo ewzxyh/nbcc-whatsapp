@@ -1,7 +1,7 @@
 services:
   nbcc:
     build: .
-    env_file: .env
+    env_file: [{path: .env, required: false}]
     restart: unless-stopped
     ports:
       - "127.0.0.1:${NBCC_BIND_PORT:-8080}:8080"
