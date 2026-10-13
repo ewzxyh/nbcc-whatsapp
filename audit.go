@@ -17,7 +17,7 @@ const auditCapacity = 200
 type auditEntry struct {
 	At     time.Time `json:"at"`
 	Action string    `json:"action"`
-	Fields []string  `json:"fields,omitempty"`
+	Fields []string  `json:"fields"`
 }
 
 type auditLog struct {
@@ -71,7 +71,9 @@ func (l *auditLog) newestFirst() []auditEntry {
 	defer l.mu.Unlock()
 	out := make([]auditEntry, 0, len(l.entries))
 	for i := len(l.entries) - 1; i >= 0; i-- {
-		out = append(out, l.entries[i])
+		entry := l.entries[i]
+		entry.Fields = append([]string{}, entry.Fields...)
+		out = append(out, entry)
 	}
 	return out
 }

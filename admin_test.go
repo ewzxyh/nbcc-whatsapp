@@ -437,6 +437,37 @@ func TestAuditActivityNewestFirstWithoutValuesOrAddresses(t *testing.T) {
 	}
 }
 
+func TestActivityAlwaysIncludesFieldsArrayForLegacyLog(t *testing.T) {
+	h := newHarness(t)
+	_, s := h.setupAdmin(testPassword)
+	legacy := `[{"at":"2026-10-13T14:00:00-03:00","action":"setup.completed"},{"at":"2026-10-13T14:01:00-03:00","action":"login.succeeded","fields":null},{"at":"2026-10-13T14:02:00-03:00","action":"settings.updated","fields":["pollIntervalMinutes"]}]`
+	if err := writeFileForTest(h.dir+"/audit.json", legacy); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	h.app.audit, err = openAudit(h.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := h.send(call{method: "GET", target: "/api/admin/activity", s: s})
+	if w.Code != 200 {
+		t.Fatal("activity request failed", w.Code)
+	}
+	var entries []map[string]any
+	decodeJSON(t, w, &entries)
+	if len(entries) != 3 {
+		t.Fatal("legacy activity was lost", len(entries))
+	}
+	for _, entry := range entries {
+		if _, ok := entry["fields"].([]any); !ok {
+			t.Fatalf("activity %s must include fields as an array, got %v", entry["action"], entry["fields"])
+		}
+	}
+	if len(entries[0]["fields"].([]any)) != 1 {
+		t.Fatal("changed fields were lost")
+	}
+}
+
 func TestSessionStateEndpointReportsStates(t *testing.T) {
 	h := newHarness(t)
 	var st map[string]string
