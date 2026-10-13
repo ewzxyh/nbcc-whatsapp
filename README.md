@@ -36,6 +36,8 @@ Copy `.env.example` to `.env` and fill in your own configuration. Keep this file
 | `SEND_ENABLED` | `false` by default; enables sending only when explicitly set to `true` |
 | `POLL_INTERVAL` | Feed polling interval; defaults to `5m`, minimum `1m` |
 | `NBCC_BIND_PORT` | Host loopback port; defaults to `8080` |
+| `COURSE_INSTRUCTORS` | Optional `Course code=Instructor name` pairs separated by semicolons, for example `Linux I=Jane Doe;Cloud I=John Smith`; shown by `/api/agenda`. Malformed pairs stop startup |
+| `WEB_DIR` | Optional directory with the built UI; defaults to `web/dist`. Docker uses `/web` |
 
 Generate independent secrets for `ADMIN_TOKEN` and `WEBHOOK_SECRET`, for example with `openssl rand -hex 32`. Do not reuse the Grapnel API key as a signing secret.
 
@@ -62,16 +64,32 @@ docker compose exec nbcc /nbcc -discover
 | Method and path | Purpose |
 |---|---|
 | `GET /healthz` | Service status and sending indicator |
+| `GET /api/agenda` | Public, read-only agenda JSON; see below |
+| `GET /` | Public web UI served from `WEB_DIR` |
 | `GET /api/preview` | Fresh agenda, date window, and activity count |
 | `GET /api/group` | Read the configured group through Grapnel |
 | `POST /api/check` | Check for feed changes now; respects `SEND_ENABLED` |
 | `POST /webhooks/grapnel` | Receive signed Grapnel group message events |
 
-All `/api/*` endpoints require `Authorization: Bearer` with **`ADMIN_TOKEN`**, not the Grapnel API key.
+All `/api/*` endpoints except `GET /api/agenda` require `Authorization: Bearer` with **`ADMIN_TOKEN`**, not the Grapnel API key.
 
 ```sh
 curl -H "Authorization: Bearer $ADMIN_TOKEN" http://127.0.0.1:8080/api/preview
 ```
+
+## Public agenda and UI
+
+`GET /api/agenda` needs no token, never sends messages, and returns JSON in the `America/Moncton` time zone:
+
+- Course assessments are `type: "activity"`, with one item per phase (`available`, `due`, or `closes`). Items for the same assessment share an `activityId`. `course`, `courseTitle`, and `instructor` come from the feed and `COURSE_INSTRUCTORS`.
+- Other feed events are `type: "event"`, including recurring events expanded within the range. Cancelled events are omitted. Meeting-link locations are returned as `null`.
+- Output is plain text. Descriptions, links, UIDs, and feed identifiers are never returned; item IDs are hashes.
+- `from` and `to` (`YYYY-MM-DD`, inclusive) default to today minus 14 days and today plus 90 days. A range may span at most 186 days. Invalid ranges return `400`.
+- The upstream feed is fetched at most once every five minutes. If a refresh fails, the last copy is served for up to one hour with its original `updatedAt`. Responses send `Cache-Control: public, max-age=300`. If no usable copy exists, the endpoint returns `502`.
+
+Course names, assessment titles, due dates, campus events, and any `COURSE_INSTRUCTORS` names are public through this endpoint. Expose the service only to the audience you intend.
+
+`GET /` serves the built UI from `WEB_DIR`: `index.html` with `no-cache`, and `/assets/*` as immutable. Only regular files are served, and `/api/*` and `/webhooks/*` paths are never served as files. The Docker build compiles the UI in a Node.js 24 stage. For local runs, build it with `npm run build` in `web/` or point `WEB_DIR` at another build.
 
 ## Webhook deployment
 

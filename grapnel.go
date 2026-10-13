@@ -26,7 +26,8 @@ type apiError struct {
 
 func (e *apiError) Error() string { return fmt.Sprintf("Grapnel HTTP %d (%s)", e.Status, e.Code) }
 
-func (a *App) api(ctx context.Context, method, path string, body any, key string, out any) error {
+// api calls Grapnel with the snapshot's API key. Errors never include the key, the URL or raw upstream text.
+func (a *App) api(ctx context.Context, s Settings, method, path string, body any, key string, out any) error {
 	var data []byte
 	var err error
 	if body != nil {
@@ -39,7 +40,7 @@ func (a *App) api(ctx context.Context, method, path string, body any, key string
 	if err != nil {
 		return errors.New("invalid Grapnel request")
 	}
-	r.Header.Set("Authorization", "Bearer "+a.cfg.APIKey)
+	r.Header.Set("Authorization", "Bearer "+s.GrapnelAPIKey)
 	if body != nil {
 		r.Header.Set("Content-Type", "application/json")
 	}
@@ -77,23 +78,24 @@ func groupName(s string) string {
 	return strings.Join(strings.Fields(strings.TrimFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })), " ")
 }
 
-func (a *App) discover(ctx context.Context) (Group, error) {
-	if a.cfg.InstanceID == "" {
-		return Group{}, errors.New("GRAPNEL_INSTANCE_ID is required")
+// discover finds the configured group. It never sends a message.
+func (a *App) discover(ctx context.Context, s Settings) (Group, error) {
+	if s.GrapnelInstanceID == "" {
+		return Group{}, errors.New("Grapnel instance is not configured")
 	}
 	var result struct {
 		Groups []Group `json:"groups"`
 	}
-	if err := a.api(ctx, "GET", "/instances/"+a.cfg.InstanceID+"/groups", nil, "", &result); err != nil {
+	if err := a.api(ctx, s, "GET", "/instances/"+s.GrapnelInstanceID+"/groups", nil, "", &result); err != nil {
 		return Group{}, err
 	}
 	var found []Group
 	for _, g := range result.Groups {
-		if a.cfg.GroupJID != "" {
-			if g.JID == a.cfg.GroupJID {
+		if s.GrapnelGroupJID != "" {
+			if g.JID == s.GrapnelGroupJID {
 				found = append(found, g)
 			}
-		} else if strings.EqualFold(groupName(g.Name), groupName(a.cfg.GroupName)) {
+		} else if strings.EqualFold(groupName(g.Name), groupName(s.GrapnelGroupName)) {
 			found = append(found, g)
 		}
 	}
@@ -106,17 +108,17 @@ func (a *App) discover(ctx context.Context) (Group, error) {
 	return found[0], nil
 }
 
-func (a *App) sendText(ctx context.Context, text, key string) error {
-	if !a.cfg.SendEnabled {
+func (a *App) sendText(ctx context.Context, s Settings, text, key string) error {
+	if !s.SendEnabled {
 		return errors.New("sending is disabled")
 	}
 	if len(utf16.Encode([]rune(text))) > 4096 {
 		return errors.New("agenda exceeds the WhatsApp message limit")
 	}
-	if a.cfg.GroupJID == "" {
+	if s.GrapnelGroupJID == "" {
 		return errors.New("target group is not configured")
 	}
-	return a.api(ctx, "POST", "/instances/"+a.cfg.InstanceID+"/messages/text", map[string]string{"number": a.cfg.GroupJID, "text": text}, "nbcc:"+key, nil)
+	return a.api(ctx, s, "POST", "/instances/"+s.GrapnelInstanceID+"/messages/text", map[string]string{"number": s.GrapnelGroupJID, "text": text}, "nbcc:"+key, nil)
 }
 
 func messageParts(text string) []string {
@@ -146,7 +148,10 @@ func messageParts(text string) []string {
 	return parts
 }
 
-func (a *App) registerWebhook(ctx context.Context, destination string) error {
+var errWebhookExists = errors.New("an instance webhook is already configured; refusing to replace it")
+
+// registerWebhook registers destination with the snapshot's webhook secret. It refuses to replace an existing webhook.
+func (a *App) registerWebhook(ctx context.Context, s Settings, destination string) error {
 	u, err := url.Parse(destination)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.Port() != "" && u.Port() != "443" {
 		return errors.New("a public HTTPS webhook URL on port 443 is required")
@@ -156,12 +161,12 @@ func (a *App) registerWebhook(ctx context.Context, destination string) error {
 			URL string `json:"url"`
 		} `json:"webhook"`
 	}
-	path := "/instances/" + a.cfg.InstanceID + "/groups/webhook"
-	if err = a.api(ctx, "GET", path, nil, "", &current); err != nil {
+	path := "/instances/" + s.GrapnelInstanceID + "/groups/webhook"
+	if err = a.api(ctx, s, "GET", path, nil, "", &current); err != nil {
 		return err
 	}
 	if current.Webhook != nil {
-		return errors.New("an instance webhook is already configured; refusing to replace it")
+		return errWebhookExists
 	}
-	return a.api(ctx, "POST", path, map[string]string{"url": destination, "secret": a.cfg.WebhookSecret}, "nbcc-webhook-"+randomID(), nil)
+	return a.api(ctx, s, "POST", path, map[string]string{"url": destination, "secret": s.WebhookSecret}, "nbcc-webhook-"+randomID(), nil)
 }
