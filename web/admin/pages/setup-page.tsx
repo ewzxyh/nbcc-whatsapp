@@ -19,22 +19,21 @@ import type { AuthResponse } from '../lib/types'
 import { useSession } from '../session'
 
 interface SetupValues {
-  email: string
   setupCode: string
   password: string
   confirmPassword: string
 }
 
-const SETUP_FIELDS = ['email', 'setupCode', 'password', 'confirmPassword'] as const
+const SETUP_FIELDS = ['setupCode', 'password', 'confirmPassword'] as const
 
 export function SetupPage() {
   useDocumentTitle('Criar acesso')
-  const { email, request, completeAuth } = useSession()
+  const { request, completeAuth } = useSession()
   const [formError, setFormError] = useState<string | null>(null)
   const [alreadyConfigured, setAlreadyConfigured] = useState(false)
   const form = useForm<SetupValues>({
     resolver: zodResolver(setupSchema),
-    defaultValues: { email, setupCode: '', password: '', confirmPassword: '' },
+    defaultValues: { setupCode: '', password: '', confirmPassword: '' },
   })
   const {
     register,
@@ -48,7 +47,6 @@ export function SetupPage() {
     setFormError(null)
     try {
       const auth = await request<AuthResponse>('POST', '/setup', {
-        email: values.email.trim(),
         setupCode: normalizeSetupCode(values.setupCode),
         password: values.password,
       })
@@ -79,7 +77,7 @@ export function SetupPage() {
     <AuthShell>
       <PageHeader
         title="Criar acesso"
-        description="O código de configuração aparece no log do serviço, uma vez por inicialização."
+        description="O e-mail de acesso já foi definido no servidor. Use o código do log para criar sua senha."
       />
       {alreadyConfigured ? (
         <Notice tone="error" className="mt-6">
@@ -92,17 +90,6 @@ export function SetupPage() {
         </div>
       ) : null}
       <form className="mt-6 space-y-6" noValidate onSubmit={onSubmit}>
-        <TextField
-          id="email"
-          label="E-mail de acesso"
-          type="email"
-          inputMode="email"
-          autoComplete="username"
-          autoCapitalize="none"
-          spellCheck={false}
-          {...register('email')}
-          error={errorText(errors.email, 'email')}
-        />
         <TextField
           id="setupCode"
           label="Código de configuração"

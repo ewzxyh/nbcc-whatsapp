@@ -38,7 +38,11 @@ export function SecretField({
 }: SecretFieldProps) {
   const [confirmRemove, setConfirmRemove] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const keepRef = useRef<HTMLButtonElement>(null)
+  const removeRef = useRef<HTMLButtonElement>(null)
+  const undoRef = useRef<HTMLButtonElement>(null)
   const focusAfterReplace = useRef(false)
+  const focusAfterKeep = useRef(false)
   const showInput = action === 'replace'
 
   useEffect(() => {
@@ -46,7 +50,11 @@ export function SecretField({
       focusAfterReplace.current = false
       inputRef.current?.focus()
     }
-  }, [showInput])
+    if (action === 'keep' && focusAfterKeep.current) {
+      focusAfterKeep.current = false
+      keepRef.current?.focus()
+    }
+  }, [showInput, action])
 
   function startReplace() {
     if (action === 'replace') {
@@ -58,6 +66,7 @@ export function SecretField({
   }
 
   function cancelReplace() {
+    focusAfterKeep.current = true
     onValueChange('')
     onActionChange('keep')
   }
@@ -68,7 +77,7 @@ export function SecretField({
         {showInput ? null : <p className="text-base font-medium text-foreground">{label}</p>}
         <ConfiguredBadge configured={configured} />
       </div>
-      {help ? <p className="text-sm text-muted-foreground">{help}</p> : null}
+      {help && !showInput ? <p className="text-sm text-muted-foreground">{help}</p> : null}
       {action === 'remove' ? (
         <p className="text-sm font-medium text-foreground">Será removido ao salvar alterações.</p>
       ) : null}
@@ -80,38 +89,43 @@ export function SecretField({
           value={value}
           onChange={(event) => onValueChange(event.target.value)}
           autoComplete="off"
+          help={help}
           error={error}
           revealLabel="Mostrar valor"
         />
       ) : null}
       <div className="flex flex-wrap gap-3">
         {action === 'keep' && !configured ? (
-          <Button variant="outline" onClick={startReplace}>
+          <Button ref={keepRef} type="button" variant="outline" onClick={startReplace}>
             Configurar
           </Button>
         ) : null}
         {action === 'keep' && configured ? (
           <>
-            <Button variant="outline" onClick={startReplace}>
+            <Button ref={keepRef} type="button" variant="outline" onClick={startReplace}>
               Substituir
             </Button>
-            <Button variant="outline" onClick={() => setConfirmRemove(true)}>
+            <Button ref={removeRef} type="button" variant="outline" onClick={() => setConfirmRemove(true)}>
               Remover
             </Button>
           </>
         ) : null}
         {action === 'replace' ? (
-          <Button variant="outline" onClick={cancelReplace}>
+          <Button type="button" variant="outline" onClick={cancelReplace}>
             Cancelar
           </Button>
         ) : null}
         {action === 'remove' ? (
-          <Button variant="outline" onClick={() => onActionChange('keep')}>
+          <Button ref={undoRef} type="button" variant="outline" onClick={() => {
+            focusAfterKeep.current = true
+            onActionChange('keep')
+          }}>
             Desfazer remoção
           </Button>
         ) : null}
         {onGenerate && action !== 'remove' ? (
           <Button
+            type="button"
             variant="outline"
             onClick={() => {
               focusAfterReplace.current = false
@@ -129,6 +143,13 @@ export function SecretField({
         description="Você pode salvar um novo valor depois. O valor atual só sai ao salvar alterações."
         confirmLabel="Remover"
         destructive
+        onCloseAutoFocus={(event) => {
+          const target = undoRef.current ?? removeRef.current
+          if (target) {
+            event.preventDefault()
+            target.focus()
+          }
+        }}
         onConfirm={() => {
           onValueChange('')
           onActionChange('remove')

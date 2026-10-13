@@ -50,7 +50,7 @@ function DayButton({ date, count, isToday, isSelected, onSelect }: DayButtonProp
       className={cn(
         'flex min-h-14 w-full flex-col items-center justify-center gap-1 rounded-xl border-2 px-0.5 py-1 text-base tabular-nums text-foreground transition-colors outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
         isToday ? 'border-primary font-bold' : 'border-transparent font-medium',
-        isSelected && 'bg-accent text-accent-foreground hover:bg-accent',
+        isSelected && 'border-primary bg-primary text-primary-foreground hover:bg-primary',
       )}
     >
       <span>{Number(date.slice(8))}</span>
@@ -58,6 +58,7 @@ function DayButton({ date, count, isToday, isSelected, onSelect }: DayButtonProp
         className={cn(
           'min-w-6 rounded-full px-1.5 text-sm leading-5',
           count > 0 ? 'border border-input bg-background text-foreground' : 'text-muted-foreground',
+          isSelected && count === 0 && 'text-primary-foreground',
         )}
       >
         {count}

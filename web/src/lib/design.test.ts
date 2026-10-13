@@ -1,6 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import CalendarView from '../components/views/CalendarView'
 
 const cssPath = fileURLToPath(new URL('../index.css', import.meta.url))
 const uiDir = fileURLToPath(new URL('../components/ui/', import.meta.url))
@@ -56,6 +59,25 @@ describe('palette contrast', () => {
       expect(tokens[b], `missing --${b}`).toBeDefined()
     }
   })
+
+  for (const selectedDate of ['2026-10-13', '2026-10-14']) {
+    it(`makes selected ${selectedDate} distinguishable by at least 3:1`, () => {
+      const html = renderToStaticMarkup(createElement(CalendarView, {
+        month: '2026-10', today: '2026-10-13', selectedDate, items: [],
+        onSelectDate: () => {}, onPreviousMonth: () => {}, onNextMonth: () => {}, onToday: () => {},
+        filtersActive: false, onClearFilters: () => {}, onSelect: () => {},
+      }))
+      const selected = html.match(/<button\b[^>]*aria-pressed="true"[^>]*>/)?.[0]
+      expect(selected).toBeDefined()
+      const classes = selected!.match(/class="([^"]*)"/)![1].split(' ')
+      const todaySelected = selectedDate === '2026-10-13'
+      const selectedBackground = classes.includes('bg-primary') ? tokens.primary : tokens.accent
+      const indicator = classes.includes('border-primary') && !todaySelected ? tokens.primary : selectedBackground
+      expect(contrastRatio(indicator, tokens.background)).toBeGreaterThanOrEqual(3)
+      const foreground = classes.includes('text-primary-foreground') ? tokens['primary-foreground'] : tokens['accent-foreground']
+      expect(contrastRatio(foreground, selectedBackground)).toBeGreaterThanOrEqual(4.5)
+    })
+  }
 
   for (const [foreground, background, minimum] of pairs) {
     it(`${foreground} on ${background} is at least ${minimum}:1`, () => {

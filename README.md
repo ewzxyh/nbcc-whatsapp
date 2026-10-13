@@ -24,12 +24,12 @@ Changing the feed URL compares the new feed with the stored baseline, so a diffe
 
 ## First run and setup
 
-No `.env` file is required. Start the service, then open the admin area:
+Before the first account is created, set `ADMIN_EMAIL` in the process environment (with Compose, it can be set in the optional `.env` file). Existing installations keep the e-mail in `admin.json`; no reconfiguration is needed. Start the service, then open the admin area:
 
 1. On the first start (no `admin.json` in the state directory), the log contains exactly one line:
    `admin setup code: XXXX-XXXX-XXXX (use it at /admin within this process lifetime)`.
    With Docker: `docker compose logs nbcc`.
-2. Open `https://<your-domain>/admin`, enter the setup code and choose the administrator e-mail and password. The e-mail can be changed later in the admin area and is never returned to unauthenticated visitors.
+2. Open `https://<your-domain>/admin`, enter the setup code and choose a password. The administrator e-mail is fixed on the server, cannot be changed in the UI or API, and is never returned to unauthenticated visitors.
 3. The setup code is valid until the account is created or the process restarts. It is kept only as a SHA-256 digest in memory and is never written to disk.
 4. Enter the NBCC feed URL, the Grapnel settings and the other values under **Settings**, then test them with the buttons in the admin area.
 
@@ -78,7 +78,7 @@ All admin endpoints are under `/api/admin`. Responses are JSON with `Cache-Contr
 | `POST /api/admin/check` | session + CSRF | Check the feed now; respects `sendEnabled` |
 | `GET /api/admin/preview` | session | WhatsApp text preview; never sends |
 | `GET /api/admin/activity` | session | Audit log, newest first, at most 200 entries |
-| `POST /api/admin/account/email` | session + CSRF | Change the e-mail; requires the current password |
+| `POST /api/admin/account/email` | session + CSRF | Refuses e-mail changes with `403 fixed_admin_email` |
 | `POST /api/admin/password` | session + CSRF | Change the password; requires the current password; revokes other sessions |
 | `POST /api/admin/sessions/revoke-others` | session + CSRF | End every other session |
 
@@ -91,7 +91,7 @@ The admin UI is served at `/admin` (and `/admin/...`) from `WEB_DIR/admin/index.
 - Passwords are stored as argon2id hashes with OWASP parameters (19 MiB, 2 iterations, 1 lane). A password must be 12 to 256 characters and must not equal the e-mail address (case-insensitive). Paste is allowed.
 - Sessions are server-side. The cookie `nbcc_admin` is `HttpOnly`, `SameSite=Strict`, `Path=/`, and `Secure` over HTTPS. It is a browser-session cookie with no fixed expiry date.
 - A session ends after 60 minutes without `session/extend`, and in any case after 12 hours. A new token is issued at each sign-in and at each password change.
-- Five failures within 15 minutes (failed sign-ins, failed setup codes, or wrong current passwords) lock that client for 15 minutes. The client address is `X-Real-IP` only when the connection comes from loopback or `TRUSTED_PROXY_IP`; otherwise it is the TCP peer address.
+- Five failures within 15 minutes (failed sign-ins, failed setup codes, or wrong current passwords) lock that client for 15 minutes. Checks and their results are serialized per IPv4 address or IPv6 `/64`, including concurrent requests. The client address is `X-Real-IP` only when the connection comes from loopback or `TRUSTED_PROXY_IP`; otherwise it is the TCP peer address.
 - Wrong sign-in details get the same response whether or not the e-mail exists, and an unknown e-mail is checked against a dummy hash.
 
 ## Secrets at rest
@@ -113,7 +113,7 @@ Session cookies are `Secure` when the request is HTTPS or carries `X-Forwarded-P
 
 ## Admin audit log
 
-`audit.json` records setup, sign-ins and failed sign-ins, sign-outs, password and e-mail changes, settings updates (names of the changed fields only), webhook registration, and session revocation. Entries never contain values or IP addresses. The log keeps the last 200 entries and is shown newest first in the admin area.
+`audit.json` records setup, sign-ins and failed sign-ins, sign-outs, password changes, settings updates (names of the changed fields only), webhook registration, and session revocation. Historical e-mail-change entries remain readable. Entries never contain values or IP addresses. The log keeps the last 200 entries and is shown newest first in the admin area.
 
 ## Public agenda and UI
 
@@ -121,7 +121,7 @@ Session cookies are `Secure` when the request is HTTPS or carries `X-Forwarded-P
 
 - Course assessments are `type: "activity"`, with one item per phase (`available`, `due`, or `closes`). Items for the same assessment share an `activityId`. `course`, `courseTitle`, and `instructor` come from the feed and the admin settings.
 - Other feed events are `type: "event"`, including recurring events expanded within the range. Cancelled events are omitted. Meeting-link locations are returned as `null`.
-- Output is plain text. Descriptions, links, UIDs, and feed identifiers are never returned; item IDs are hashes.
+- Output is plain text. Descriptions, links, UIDs, and feed identifiers are never returned; item IDs use HMAC-SHA-256 with the persisted private key, so identifiers cannot be guessed offline. IDs stay stable across restarts with the same key.
 - `from` and `to` (`YYYY-MM-DD`, inclusive) default to today minus 14 days and today plus 90 days. A range may span at most 186 days. Invalid ranges return `400`.
 - The upstream feed is cached for `agendaCacheMinutes` (default 60). After a failed refresh, the last copy is served for up to 24 hours with its original `updatedAt`. Failed refreshes are retried at most every five minutes. Responses send `Cache-Control: public, max-age=300`. If no usable copy exists, the endpoint returns `502`.
 - `omittedEvents` counts campus events left out of this response (see the next section). It is `0` when none.
@@ -144,7 +144,7 @@ A problem with one campus event (not a course assessment) does not stop the agen
 | `duplicate_uid` | A second event with an already-used UID |
 | `other` | Anything else |
 
-Problems with course activities (`Available`, `Due`, `Availability Ends`) are still errors: `/api/agenda` returns `502`, and a refresh with such a problem is rejected so the last good copy is kept. An empty calendar is also an error. An omitted event counts in every window when its start date cannot be read; otherwise it counts only when its first date falls inside the window.
+Problems with course activities (`Available`, `Due`, `Availability Ends`) are still errors: `/api/agenda` returns `502`, and a refresh with such a problem is rejected so the last good copy is kept. An empty calendar is also an error. Omissions include series that started earlier but can affect the requested window, including explicit recurrence dates. Unreadable dates and complex rejected series are counted conservatively when overlap cannot be ruled out; high-frequency series are not expanded just to count warnings. A rejected campus override does not claim its master's UID, so feed order does not hide the master series.
 
 ## Webhook deployment
 
@@ -190,7 +190,7 @@ CGO_ENABLED=0 go build -o nbcc-whatsapp .
 
 For a local run, set `STATE_PATH` to a scratch directory (the default `data/state.json` is relative to the working directory) and `LISTEN_ADDR=127.0.0.1:8080`. For the UI, run `cd web && npm install && npm run dev`; Vite proxies `/api` to the service.
 
-Tests cover date boundaries, `(TODAY)`, recurrence, daylight saving time, stable feed comparisons, webhook signatures and secret rotation, group isolation, disabled sending, restart deduplication, partial-message retries, setup and sign-in, lockout and client addresses, session lifetimes, CSRF and origin checks, password and e-mail changes, settings validation, encryption at rest, the legacy seed, omitted events, and static routing. Test identifiers and secrets are synthetic.
+Tests cover date boundaries, `(TODAY)`, recurrence, daylight saving time, stable feed comparisons, webhook signatures and secret rotation, group isolation, disabled sending, restart deduplication, partial-message retries, setup and sign-in, concurrent lockout and IPv6 prefixes, fixed administrator identity, session lifetimes, CSRF and origin checks, password changes, settings validation, encryption at rest, keyed public IDs, the legacy seed, omitted series and override order, static routing, calendar contrast and secret-field accessibility. Test identifiers and secrets are synthetic.
 
 ## Private data
 

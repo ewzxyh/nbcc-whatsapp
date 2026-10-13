@@ -5,6 +5,7 @@ export const FALLBACK_MESSAGE = 'Algo deu errado. Tente novamente.'
 const MESSAGES: Record<string, string> = {
   required: 'Preencha este campo.',
   invalid_email: 'Informe um e-mail válido.',
+  fixed_admin_email: 'O e-mail de acesso é fixo e não pode ser alterado.',
   invalid_feed_url: 'Use o link HTTPS do calendário NBCC, copiado do Brightspace.',
   invalid_uuid: 'Informe um ID no formato UUID.',
   invalid_group_jid: 'Informe um ID de grupo no formato 000000000000@g.us.',

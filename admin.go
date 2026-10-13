@@ -45,17 +45,23 @@ type adminAccount struct {
 // AdminStore holds the single administrator account. While no account exists, a one-time setup code is kept
 // in memory as a SHA-256 digest only.
 type AdminStore struct {
-	mu        sync.Mutex
-	path      string
-	acct      *adminAccount
-	setupHash [32]byte
+	mu         sync.Mutex
+	path       string
+	acct       *adminAccount
+	setupHash  [32]byte
+	fixedEmail string
 }
 
 // openAdmin loads <dir>/admin.json. When it is absent, a setup code is generated and logged exactly once.
-func openAdmin(dir string) (*AdminStore, error) {
+func openAdmin(dir, initialEmail string) (*AdminStore, error) {
 	st := &AdminStore{path: filepath.Join(dir, "admin.json")}
 	b, err := os.ReadFile(st.path)
 	if errors.Is(err, fs.ErrNotExist) {
+		email, ok := normalizeEmail(initialEmail)
+		if !ok {
+			return nil, errors.New("set a valid ADMIN_EMAIL before first-time setup")
+		}
+		st.fixedEmail = email
 		code, digest := newSetupCode()
 		st.setupHash = digest
 		log.Printf("admin setup code: %s (use it at /admin within this process lifetime)", code)
@@ -69,6 +75,7 @@ func openAdmin(dir string) (*AdminStore, error) {
 		return nil, errors.New("invalid admin account file")
 	}
 	st.acct = &acct
+	st.fixedEmail = acct.Email
 	return st, nil
 }
 
@@ -116,13 +123,13 @@ func (st *AdminStore) checkSetupCode(input string) bool {
 }
 
 // create stores the first account and retires the setup code.
-func (st *AdminStore) create(email, passwordHash string, now time.Time) error {
+func (st *AdminStore) create(passwordHash string, now time.Time) error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.acct != nil {
 		return errAlreadyConfigured
 	}
-	acct := adminAccount{Email: email, PasswordHash: passwordHash, CreatedAt: now.In(moncton)}
+	acct := adminAccount{Email: st.fixedEmail, PasswordHash: passwordHash, CreatedAt: now.In(moncton)}
 	if err := saveAdmin(st.path, acct); err != nil {
 		return err
 	}
@@ -140,6 +147,9 @@ func (st *AdminStore) update(change func(*adminAccount)) error {
 	}
 	next := *st.acct
 	change(&next)
+	if next.Email != st.fixedEmail {
+		return errors.New("administrator email is fixed")
+	}
 	if err := saveAdmin(st.path, next); err != nil {
 		return err
 	}

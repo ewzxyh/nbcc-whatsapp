@@ -20,12 +20,13 @@ import (
 var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var groupJIDPattern = regexp.MustCompile(`^\d{5,25}(?:-\d{5,20})?@g\.us$`)
 
-// Config holds infrastructure values only. Everything else is runtime Settings, edited in /admin.
+// Config holds infrastructure and the initial fixed admin identity. Runtime Settings are edited in /admin.
 type Config struct {
 	ListenAddr     string
 	StatePath      string
 	WebDir         string
 	TrustedProxyIP net.IP
+	AdminEmail     string
 }
 
 func envOr(key, fallback string) string {
@@ -41,6 +42,7 @@ func loadConfig() Config {
 		StatePath:      envOr("STATE_PATH", "data/state.json"),
 		WebDir:         envOr("WEB_DIR", "web/dist"),
 		TrustedProxyIP: net.ParseIP(os.Getenv("TRUSTED_PROXY_IP")),
+		AdminEmail:     os.Getenv("ADMIN_EMAIL"),
 	}
 }
 
@@ -100,7 +102,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	a.admin, err = openAdmin(dataDir)
+	a.admin, err = openAdmin(dataDir, cfg.AdminEmail)
 	if err != nil {
 		log.Fatal(err)
 	}

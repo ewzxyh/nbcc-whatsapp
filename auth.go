@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,13 +149,16 @@ func (st *sessionStore) remove(key [32]byte) {
 	delete(st.sessions, key)
 }
 
-// attemptLimiter counts failed credential attempts per client IP.
+// attemptLimiter counts failed credential attempts per IPv4 address or IPv6 /64.
 type attemptLimiter struct {
 	mu      sync.Mutex
 	clients map[string]*clientAttempts
 }
 
 type clientAttempts struct {
+	mu          sync.Mutex
+	users       int
+	lastUsed    time.Time
 	failures    []time.Time
 	lockedUntil time.Time
 }
@@ -163,54 +167,71 @@ func newAttemptLimiter() *attemptLimiter {
 	return &attemptLimiter{clients: map[string]*clientAttempts{}}
 }
 
-// blocked reports whether ip is currently locked and for how long.
-func (l *attemptLimiter) blocked(ip string, now time.Time) (time.Duration, bool) {
+// verify is the shared credential boundary used by login, setup and current-password checks.
+func (l *attemptLimiter) verify(ip string, now func() time.Time, check func() bool) (bool, time.Duration) {
+	key := attemptKey(ip)
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	c := l.clients[ip]
-	if c == nil || !now.Before(c.lockedUntil) {
-		return 0, false
-	}
-	return c.lockedUntil.Sub(now), true
-}
-
-// failed records one failure. When it is the failureLimit-th failure inside failureWindow, the IP is locked
-// for lockDuration and that duration is returned with true.
-func (l *attemptLimiter) failed(ip string, now time.Time) (time.Duration, bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if len(l.clients) >= maxLimiterEntries {
-		for k, c := range l.clients {
-			if !now.Before(c.lockedUntil) && len(c.failures) == 0 {
-				delete(l.clients, k)
+	c := l.clients[key]
+	if c == nil {
+		if len(l.clients) >= maxLimiterEntries {
+			for k, old := range l.clients {
+				if old.users == 0 && now().Sub(old.lastUsed) >= max(failureWindow, lockDuration) {
+					delete(l.clients, k)
+				}
 			}
 		}
-	}
-	c := l.clients[ip]
-	if c == nil {
+		if len(l.clients) >= maxLimiterEntries {
+			l.mu.Unlock()
+			return false, lockDuration
+		}
 		c = &clientAttempts{}
-		l.clients[ip] = c
+		l.clients[key] = c
 	}
+	c.users++ // Keep the bucket alive while checks are running or queued.
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		c.users--
+		c.lastUsed = now()
+		l.mu.Unlock()
+	}()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t := now()
+	if t.Before(c.lockedUntil) {
+		return false, c.lockedUntil.Sub(t)
+	}
+	if check() {
+		c.failures = nil
+		c.lockedUntil = time.Time{}
+		return true, 0
+	}
+	t = now()
 	kept := c.failures[:0]
-	for _, t := range c.failures {
-		if now.Sub(t) < failureWindow {
-			kept = append(kept, t)
+	for _, failedAt := range c.failures {
+		if t.Sub(failedAt) < failureWindow {
+			kept = append(kept, failedAt)
 		}
 	}
-	c.failures = append(kept, now)
+	c.failures = append(kept, t)
 	if len(c.failures) >= failureLimit {
 		c.failures = nil
-		c.lockedUntil = now.Add(lockDuration)
-		return lockDuration, true
+		c.lockedUntil = t.Add(lockDuration)
+		return false, lockDuration
 	}
-	return 0, false
+	return false, 0
 }
 
-// succeeded clears the record for ip after a successful credential check.
-func (l *attemptLimiter) succeeded(ip string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.clients, ip)
+func attemptKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.Unmap()
+	if addr.Is6() {
+		return netip.PrefixFrom(addr, 64).Masked().String()
+	}
+	return addr.String()
 }
 
 // clientIP trusts only loopback and the explicitly configured proxy, including a Docker bridge gateway.

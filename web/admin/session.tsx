@@ -35,7 +35,6 @@ export interface SessionValue {
   // Calls /api/admin/<path>. Sends the CSRF token on writes and ends the session on 401.
   request: <T>(method: HttpMethod, path: string, body?: unknown) => Promise<T>
   completeAuth: (auth: AuthResponse) => void
-  setEmail: (email: string) => void
   endSession: (notice: string | null) => void
   logout: () => Promise<void>
   extendSession: () => Promise<boolean>
@@ -132,10 +131,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, phase: 'authenticated', email: auth.email ?? prev.email, notice: null, warningOpen: false }))
   }, [])
 
-  const setEmail = useCallback((email: string) => {
-    setState((prev) => ({ ...prev, email }))
-  }, [])
-
   const extendSession = useCallback(async (): Promise<boolean> => {
     if (extendingRef.current) return false
     extendingRef.current = true
@@ -213,14 +208,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       minutesLeft: state.minutesLeft,
       request,
       completeAuth,
-      setEmail,
       endSession,
       logout,
       extendSession,
       retryBootstrap,
       endingRef,
     }),
-    [state, request, completeAuth, setEmail, endSession, logout, extendSession, retryBootstrap],
+    [state, request, completeAuth, endSession, logout, extendSession, retryBootstrap],
   )
 
   return (

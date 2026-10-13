@@ -217,7 +217,7 @@ func newHarnessWeb(t *testing.T, withIndex, withAdmin bool) *testHarness {
 	if a.settings, err = openSettings(dir, testSettingsSeed); err != nil {
 		t.Fatal(err)
 	}
-	if a.admin, err = openAdmin(dir); err != nil {
+	if a.admin, err = openAdmin(dir, defaultAdminEmail); err != nil {
 		t.Fatal(err)
 	}
 	if a.audit, err = openAudit(dir); err != nil {

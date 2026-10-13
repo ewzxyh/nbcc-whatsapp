@@ -355,29 +355,20 @@ func TestPasswordChangePolicyAndSessionRevocation(t *testing.T) {
 	}
 }
 
-func TestEmailChange(t *testing.T) {
+func TestAdminEmailCannotBeChanged(t *testing.T) {
 	h := newHarness(t)
 	_, s := h.setupAdmin(testPassword)
-	change := func(current, email string) *httptest.ResponseRecorder {
-		return h.send(call{method: "POST", target: "/api/admin/account/email", s: s, body: map[string]string{"currentPassword": current, "email": email}})
+	before, _ := readFileForTest(h.dir + "/admin.json")
+	w := h.send(call{method: "POST", target: "/api/admin/account/email", s: s, body: map[string]string{"currentPassword": testPassword, "email": "new.owner@example.test"}})
+	if w.Code != 403 || errorCode(t, w) != "fixed_admin_email" {
+		t.Fatal("authenticated email mutation must be refused", w.Code, w.Body.String())
 	}
-	if w := change("wrong-current-password", "new.owner@example.test"); w.Code != 401 {
-		t.Fatal("current password required", w.Code)
+	after, _ := readFileForTest(h.dir + "/admin.json")
+	if before != after {
+		t.Fatal("fixed account changed on disk")
 	}
-	if w := change(testPassword, "not-an-email"); w.Code != 422 || !strings.Contains(w.Body.String(), `"email":"invalid_email"`) {
-		t.Fatal("invalid email", w.Body.String())
-	}
-	if w := change(testPassword, testPassword); w.Code != 422 {
-		t.Fatal("email equal to the password must be refused", w.Code)
-	}
-	if w := change(testPassword, "New.Owner@Example.test"); w.Code != 204 {
-		t.Fatal("email change", w.Code, w.Body.String())
-	}
-	if w, _ := h.login("NEW.owner@example.test", testPassword); w.Code != 200 {
-		t.Fatal("new email must log in case-insensitively", w.Code)
-	}
-	if w, _ := h.login(defaultAdminEmail, testPassword); w.Code != 401 {
-		t.Fatal("old email must stop working", w.Code)
+	if w, _ := h.login(defaultAdminEmail, testPassword); w.Code != 200 {
+		t.Fatal("existing email must still log in", w.Code)
 	}
 }
 
@@ -487,29 +478,29 @@ func TestSessionStateEndpointReportsStates(t *testing.T) {
 	}
 }
 
-func TestSetupUsesChosenEmailAndOnlyRevealsItAfterAuthentication(t *testing.T) {
+func TestSetupUsesFixedEmailAndOnlyRevealsItAfterAuthentication(t *testing.T) {
 	h := newHarness(t)
 	code := regexp.MustCompile(testSetupCodeRe).FindStringSubmatch(h.logs.String())[1]
-	for _, email := range []string{"", "not-an-email"} {
+	for _, email := range []string{"owner@example.test", "not-an-email"} {
 		w := h.send(call{method: "POST", target: "/api/admin/setup", body: map[string]string{"setupCode": code, "email": email, "password": testPassword}})
-		if w.Code != 422 || !strings.Contains(w.Body.String(), `"email":"invalid_email"`) {
-			t.Fatal("invalid setup email accepted", w.Code, w.Body.String())
+		if w.Code != 422 || !strings.Contains(w.Body.String(), `"email":"fixed_admin_email"`) {
+			t.Fatal("chosen setup email accepted", w.Code, w.Body.String())
 		}
 	}
-	w := h.send(call{method: "POST", target: "/api/admin/setup", body: map[string]string{"setupCode": code, "email": " Owner@Example.test ", "password": testPassword}})
+	w := h.send(call{method: "POST", target: "/api/admin/setup", body: map[string]string{"setupCode": code, "password": testPassword}})
 	if w.Code != 201 {
-		t.Fatal("chosen email setup failed", w.Code, w.Body.String())
+		t.Fatal("fixed email setup failed", w.Code, w.Body.String())
 	}
 	var auth map[string]string
 	decodeJSON(t, w, &auth)
-	if auth["email"] != "owner@example.test" {
-		t.Fatal("authenticated response must contain normalized email", auth)
+	if auth["email"] != defaultAdminEmail {
+		t.Fatal("authenticated response must contain the configured identity", auth)
 	}
-	if w, _ := h.login("owner@example.test", testPassword); w.Code != 200 {
-		t.Fatal("chosen email cannot sign in", w.Code)
+	if w, _ := h.login(strings.ToUpper(defaultAdminEmail), testPassword); w.Code != 200 {
+		t.Fatal("fixed email cannot sign in", w.Code)
 	}
 	public := h.send(call{method: "GET", target: "/api/admin/session"})
-	if strings.Contains(public.Body.String(), "owner@example.test") {
+	if strings.Contains(public.Body.String(), defaultAdminEmail) {
 		t.Fatal("unauthenticated endpoint exposes account email")
 	}
 }

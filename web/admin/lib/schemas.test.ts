@@ -2,7 +2,6 @@ import type { z } from 'zod'
 import { describe, expect, it } from 'vitest'
 import {
   agendaFormSchema,
-  emailChangeSchema,
   instructorFormSchema,
   loginSchema,
   passwordChangeSchema,
@@ -128,10 +127,9 @@ describe('account schemas', () => {
     ).toEqual([{ path: 'confirmPassword', message: 'mismatch' }])
   })
 
-  it('checks the setup code and the setup password against the e-mail', () => {
+  it('checks the setup code and the setup password', () => {
     expect(
       issuesOf(setupSchema, {
-        email: 'admin@example.test',
         setupCode: 'ABCD',
         password: 'short',
         confirmPassword: 'short',
@@ -142,18 +140,12 @@ describe('account schemas', () => {
     ])
   })
 
-  it('requires a chosen setup e-mail and rejects using it as the password', () => {
-    expect(issuesOf(setupSchema, { email: '', setupCode: 'ABCD-EFGH-IJKL', password: 'long test password', confirmPassword: 'long test password' })).toEqual([
-      { path: 'email', message: 'required' },
-    ])
-    expect(issuesOf(setupSchema, { email: 'admin@example.test', setupCode: 'ABCD-EFGH-IJKL', password: 'admin@example.test', confirmPassword: 'admin@example.test' })).toEqual([
-      { path: 'password', message: 'same_as_email' },
-    ])
-  })
-
-  it('checks the new e-mail format', () => {
-    expect(issuesOf(emailChangeSchema, { currentPassword: 'x', newEmail: 'not-an-email' })).toEqual([
-      { path: 'newEmail', message: 'invalid_email' },
-    ])
+  it('sets up without asking for or returning a chosen e-mail', () => {
+    const result = setupSchema.safeParse({
+      email: 'chosen@example.test', setupCode: 'ABCD-EFGH-IJKL',
+      password: 'long test password', confirmPassword: 'long test password',
+    })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data).not.toHaveProperty('email')
   })
 })

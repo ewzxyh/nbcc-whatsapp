@@ -29,8 +29,6 @@ export function useAdminApi() {
       activity: () => request<ActivityEntry[]>('GET', '/activity'),
       changePassword: (currentPassword: string, newPassword: string) =>
         request<PasswordChangeResult>('POST', '/password', { currentPassword, newPassword }),
-      changeEmail: (currentPassword: string, email: string) =>
-        request<void>('POST', '/account/email', { currentPassword, email }),
       revokeOtherSessions: () => request<void>('POST', '/sessions/revoke-others'),
     }),
     [request],

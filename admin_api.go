@@ -99,16 +99,11 @@ func (a *App) adminSessionState(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) setup(w http.ResponseWriter, r *http.Request) {
-	now := a.now()
 	if a.admin.configured() {
 		jsonResponse(w, 409, map[string]string{"error": "already_configured"})
 		return
 	}
 	ip := clientIP(r, a.cfg.TrustedProxyIP)
-	if wait, locked := a.limiter.blocked(ip, now); locked {
-		tooManyAttempts(w, wait)
-		return
-	}
 	var body struct {
 		SetupCode string `json:"setupCode"`
 		Email     string `json:"email"`
@@ -117,17 +112,17 @@ func (a *App) setup(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	if !a.admin.checkSetupCode(body.SetupCode) {
-		if wait, locked := a.limiter.failed(ip, now); locked {
+	if ok, wait := a.limiter.verify(ip, a.now, func() bool { return a.admin.checkSetupCode(body.SetupCode) }); !ok {
+		if wait > 0 {
 			tooManyAttempts(w, wait)
 			return
 		}
 		jsonResponse(w, 401, map[string]string{"error": "invalid_setup_code"})
 		return
 	}
-	email, ok := normalizeEmail(body.Email)
-	if !ok {
-		validationFailed(w, map[string]string{"email": "invalid_email"})
+	email := a.admin.fixedEmail
+	if body.Email != "" && strings.ToLower(strings.TrimSpace(body.Email)) != email {
+		validationFailed(w, map[string]string{"email": "fixed_admin_email"})
 		return
 	}
 	if code := passwordCode(body.Password, email); code != "" {
@@ -139,7 +134,7 @@ func (a *App) setup(w http.ResponseWriter, r *http.Request) {
 		serverError(w)
 		return
 	}
-	if err = a.admin.create(email, hash, now); err != nil {
+	if err = a.admin.create(hash, a.now()); err != nil {
 		if errors.Is(err, errAlreadyConfigured) {
 			jsonResponse(w, 409, map[string]string{"error": "already_configured"})
 			return
@@ -147,18 +142,12 @@ func (a *App) setup(w http.ResponseWriter, r *http.Request) {
 		serverError(w)
 		return
 	}
-	a.limiter.succeeded(ip)
-	a.audit.record(now, "setup.completed")
+	a.audit.record(a.now(), "setup.completed")
 	a.issueSession(w, r, 201)
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
-	now := a.now()
 	ip := clientIP(r, a.cfg.TrustedProxyIP)
-	if wait, locked := a.limiter.blocked(ip, now); locked {
-		tooManyAttempts(w, wait)
-		return
-	}
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -166,17 +155,21 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	if !a.admin.verify(body.Email, body.Password) {
-		a.audit.record(now, "login.failed")
-		if wait, locked := a.limiter.failed(ip, now); locked {
+	if ok, wait := a.limiter.verify(ip, a.now, func() bool {
+		valid := a.admin.verify(body.Email, body.Password)
+		if !valid {
+			a.audit.record(a.now(), "login.failed")
+		}
+		return valid
+	}); !ok {
+		if wait > 0 {
 			tooManyAttempts(w, wait)
 			return
 		}
 		jsonResponse(w, 401, map[string]string{"error": "invalid_credentials"})
 		return
 	}
-	a.limiter.succeeded(ip)
-	a.audit.record(now, "login.succeeded")
+	a.audit.record(a.now(), "login.succeeded")
 	a.issueSession(w, r, 200)
 }
 
@@ -296,7 +289,7 @@ func (a *App) testFeed(w http.ResponseWriter, r *http.Request, _ adminSession) {
 		return
 	}
 	from, to := defaultWindow(dayOf(a.now()))
-	items, omitted, err := buildAgenda(raw, dayStart(from), dayStart(to.AddDate(0, 0, 1)), s.CourseInstructors)
+	items, omitted, err := buildAgenda(raw, dayStart(from), dayStart(to.AddDate(0, 0, 1)), s.CourseInstructors, a.settings.key)
 	if err != nil {
 		jsonResponse(w, 502, map[string]string{"error": "feed_unavailable"})
 		return
@@ -360,7 +353,7 @@ func (a *App) courses(w http.ResponseWriter, r *http.Request, _ adminSession) {
 		return
 	}
 	today := dayOf(a.now())
-	items, _, err := buildAgenda(raw, dayStart(today.AddDate(0, 0, -365)), dayStart(today.AddDate(0, 0, 366)), a.settings.current().CourseInstructors)
+	items, _, err := buildAgenda(raw, dayStart(today.AddDate(0, 0, -365)), dayStart(today.AddDate(0, 0, 366)), a.settings.current().CourseInstructors, a.settings.key)
 	if err != nil {
 		jsonResponse(w, 502, map[string]string{"error": "feed_unavailable"})
 		return
@@ -430,57 +423,12 @@ func (a *App) activity(w http.ResponseWriter, r *http.Request, _ adminSession) {
 }
 
 func (a *App) changeEmail(w http.ResponseWriter, r *http.Request, _ adminSession) {
-	now := a.now()
-	ip := clientIP(r, a.cfg.TrustedProxyIP)
-	if wait, locked := a.limiter.blocked(ip, now); locked {
-		tooManyAttempts(w, wait)
-		return
-	}
-	var body struct {
-		CurrentPassword string `json:"currentPassword"`
-		Email           string `json:"email"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	acct, configured := a.admin.account()
-	if !configured {
-		jsonResponse(w, 401, map[string]string{"error": "unauthenticated"})
-		return
-	}
-	if !verifyPassword(body.CurrentPassword, acct.PasswordHash) {
-		if wait, locked := a.limiter.failed(ip, now); locked {
-			tooManyAttempts(w, wait)
-			return
-		}
-		jsonResponse(w, 401, map[string]string{"error": "invalid_credentials"})
-		return
-	}
-	email, ok := normalizeEmail(body.Email)
-	if !ok {
-		validationFailed(w, map[string]string{"email": "invalid_email"})
-		return
-	}
-	if strings.EqualFold(body.CurrentPassword, email) {
-		validationFailed(w, map[string]string{"email": "same_as_password"})
-		return
-	}
-	if err := a.admin.update(func(x *adminAccount) { x.Email = email }); err != nil {
-		serverError(w)
-		return
-	}
-	a.audit.record(now, "email.changed")
-	w.WriteHeader(http.StatusNoContent)
+	jsonResponse(w, 403, map[string]string{"error": "fixed_admin_email"})
 }
 
 // changePassword verifies the current password, applies the policy, rotates this session's token and revokes every other session.
 func (a *App) changePassword(w http.ResponseWriter, r *http.Request, s adminSession) {
-	now := a.now()
 	ip := clientIP(r, a.cfg.TrustedProxyIP)
-	if wait, locked := a.limiter.blocked(ip, now); locked {
-		tooManyAttempts(w, wait)
-		return
-	}
 	var body struct {
 		CurrentPassword string `json:"currentPassword"`
 		NewPassword     string `json:"newPassword"`
@@ -493,8 +441,8 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request, s adminSess
 		jsonResponse(w, 401, map[string]string{"error": "unauthenticated"})
 		return
 	}
-	if !verifyPassword(body.CurrentPassword, acct.PasswordHash) {
-		if wait, locked := a.limiter.failed(ip, now); locked {
+	if ok, wait := a.limiter.verify(ip, a.now, func() bool { return verifyPassword(body.CurrentPassword, acct.PasswordHash) }); !ok {
+		if wait > 0 {
 			tooManyAttempts(w, wait)
 			return
 		}
@@ -514,13 +462,13 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request, s adminSess
 		serverError(w)
 		return
 	}
-	token, next, ok := a.sessions.rotateAndRevoke(s.key, now)
+	token, next, ok := a.sessions.rotateAndRevoke(s.key, a.now())
 	if !ok {
 		jsonResponse(w, 401, map[string]string{"error": "unauthenticated"})
 		return
 	}
 	setSessionCookie(w, r, token)
-	a.audit.record(now, "password.changed")
+	a.audit.record(a.now(), "password.changed")
 	jsonResponse(w, 200, map[string]string{"csrfToken": next.csrf, "expiresAt": rfc3339(next.expiresAt())})
 }
 

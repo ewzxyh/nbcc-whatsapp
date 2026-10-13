@@ -31,11 +31,10 @@ export const loginSchema = z
   })
 
 export const setupSchema = z
-  .object({ email: z.string(), setupCode: z.string(), password: z.string(), confirmPassword: z.string() })
+  .object({ setupCode: z.string(), password: z.string(), confirmPassword: z.string() })
   .superRefine((values, ctx) => {
-    addIssue(ctx, ['email'], validateEmail(values.email))
     addIssue(ctx, ['setupCode'], validateSetupCode(values.setupCode))
-    addIssue(ctx, ['password'], validatePassword(values.password, values.email))
+    addIssue(ctx, ['password'], validatePassword(values.password, ''))
     addIssue(ctx, ['confirmPassword'], values.confirmPassword !== values.password ? 'mismatch' : null)
   })
 
@@ -51,13 +50,6 @@ export function passwordChangeSchema(email: string) {
       addIssue(ctx, ['confirmPassword'], values.confirmPassword !== values.newPassword ? 'mismatch' : null)
     })
 }
-
-export const emailChangeSchema = z
-  .object({ currentPassword: z.string(), newEmail: z.string() })
-  .superRefine((values, ctx) => {
-    addIssue(ctx, ['currentPassword'], values.currentPassword === '' ? 'required' : null)
-    addIssue(ctx, ['newEmail'], validateEmail(values.newEmail))
-  })
 
 export const agendaFormSchema = z
   .object({

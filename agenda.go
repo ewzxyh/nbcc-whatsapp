@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	ical "github.com/emersion/go-ical"
+	"github.com/teambition/rrule-go"
 )
 
 var moncton, _ = time.LoadLocation("America/Moncton")
@@ -28,7 +30,7 @@ const (
 
 var (
 	agendaTagPattern = regexp.MustCompile(`<[^>]*>`)
-	agendaURLPattern = regexp.MustCompile(`(?i)\S*(?:http|www\.|://)\S*`)
+	agendaURLPattern = regexp.MustCompile(`(?i)(?:http|www\.|[a-z][a-z0-9+.-]*://|//|mailto:)(?:<[^>]*>|\S)*`)
 )
 
 var phaseLabels = map[string]string{"Available": "available", "Due": "due", "Availability Ends": "closes"}
@@ -75,12 +77,6 @@ type omittedEvent struct {
 	Title  string `json:"title"`
 	Date   string `json:"date"`
 	Reason string `json:"reason"`
-	at     time.Time
-}
-
-// inWindow reports whether the event starts inside [from, until). An event whose start cannot be read counts in every window.
-func (o omittedEvent) inWindow(from, until time.Time) bool {
-	return o.at.IsZero() || (!o.at.Before(from) && o.at.Before(until))
 }
 
 // agendaProblem is an event-level problem with a reason code. Course-activity problems are fatal; campus-event problems omit the event.
@@ -157,26 +153,28 @@ func defaultWindow(today time.Time) (time.Time, time.Time) {
 }
 
 func plainText(s string) string {
-	s = html.UnescapeString(s)
-	return cleanText(agendaURLPattern.ReplaceAllString(agendaTagPattern.ReplaceAllString(s, " "), " "))
+	s = agendaURLPattern.ReplaceAllString(html.UnescapeString(s), " ")
+	return cleanText(agendaTagPattern.ReplaceAllString(s, " "))
 }
 
 func agendaLocation(s string) *string {
+	s = html.UnescapeString(s)
 	s = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), " (New Brunswick Community College)"))
 	lower := strings.ToLower(s)
-	if strings.Contains(lower, "http") || strings.Contains(lower, "://") || strings.Contains(lower, "www.") {
+	if strings.Contains(lower, "http") || strings.Contains(lower, "//") || strings.Contains(lower, "www.") {
 		return nil
 	}
 	return nullable(plainText(s))
 }
 
-func agendaHash(parts ...string) string {
-	h := sha256.New()
+func agendaHash(key []byte, parts ...string) string {
+	h := hmac.New(sha256.New, key)
+	h.Write([]byte("nbcc-agenda-id\x00"))
 	for _, p := range parts {
 		h.Write([]byte(p))
 		h.Write([]byte{0})
 	}
-	return hex.EncodeToString(h.Sum(nil)[:8])
+	return hex.EncodeToString(h.Sum(nil)[:16])
 }
 
 // agendaSlots expands one event into its occurrences in [from, until). Errors are agendaProblems.
@@ -240,8 +238,68 @@ type rawEvent struct {
 	startOK   bool
 }
 
+// Count a problematic series when it can affect this window, even if its DTSTART is older.
+func omittedInWindow(r rawEvent, from, until time.Time) bool {
+	inside := func(t time.Time) bool { return !t.Before(from) && t.Before(until) }
+	if !r.startOK || inside(r.start) {
+		return true
+	}
+	for _, name := range []string{ical.PropRecurrenceDates, ical.PropRecurrenceID} {
+		for _, prop := range r.ev.Props[name] {
+			for _, value := range strings.Split(prop.Value, ",") {
+				date := prop
+				date.Value = value
+				t, err := date.DateTime(moncton)
+				if err != nil || inside(t) {
+					return true
+				}
+			}
+		}
+	}
+	prop := r.ev.Props.Get(ical.PropRecurrenceRule)
+	if prop == nil || !r.start.Before(until) {
+		return false
+	}
+	options, err := r.ev.Props.RecurrenceRule()
+	if err != nil {
+		return true
+	}
+	if !options.Until.IsZero() && options.Until.Before(from) {
+		return false
+	}
+	// shortcut: warn conservatively for unbounded/complex rejected series; do not expand them for a count.
+	if options.Count <= 0 || options.Count > 1000 {
+		return true
+	}
+	for _, part := range strings.Split(prop.Value, ";") {
+		key, _, _ := strings.Cut(part, "=")
+		switch key {
+		case "FREQ", "INTERVAL", "COUNT", "UNTIL", "WKST":
+		default:
+			return true
+		}
+	}
+	options.Dtstart = r.start
+	rule, err := rrule.NewRRule(*options)
+	if err != nil {
+		return true
+	}
+	next := rule.Iterator()
+	for i := 0; i < options.Count; i++ {
+		t, ok := next()
+		if !ok || !t.Before(until) {
+			return false
+		}
+		if inside(t) {
+			return true
+		}
+	}
+	return false
+}
+
 type agendaBuilder struct {
 	from, until time.Time
+	idKey       []byte
 	seen        map[string]bool
 	activities  map[string]map[string]activityPhase
 	items       []agendaItem
@@ -271,10 +329,9 @@ func (b *agendaBuilder) add(e ical.Event) error {
 		o.Title = plainText(r.summary)
 	}
 	if r.startOK {
-		o.at = r.start.In(moncton)
-		o.Date = o.at.Format(dateLayout)
+		o.Date = r.start.In(moncton).Format(dateLayout)
 	}
-	if o.inWindow(b.from, b.until) {
+	if omittedInWindow(r, b.from, b.until) {
 		b.omitted = append(b.omitted, o)
 	}
 	return nil
@@ -282,6 +339,9 @@ func (b *agendaBuilder) add(e ical.Event) error {
 
 func (b *agendaBuilder) process(r rawEvent) error {
 	e := r.ev
+	if e.Props.Get(ical.PropRecurrenceID) != nil {
+		return newProblem("recurrence_override", "recurrence overrides require review before sending")
+	}
 	uid, err := e.Props.Text(ical.PropUID)
 	if err != nil || uid == "" {
 		return newProblem("other", "missing or duplicate calendar UID")
@@ -290,9 +350,6 @@ func (b *agendaBuilder) process(r rawEvent) error {
 		return newProblem("duplicate_uid", "missing or duplicate calendar UID")
 	}
 	b.seen[uid] = true
-	if e.Props.Get(ical.PropRecurrenceID) != nil {
-		return newProblem("recurrence_override", "recurrence overrides require review before sending")
-	}
 	if !r.summaryOK {
 		return newProblem("invalid_title", "invalid event title")
 	}
@@ -312,7 +369,7 @@ func (b *agendaBuilder) process(r rawEvent) error {
 	}
 	if r.phase == "" {
 		for _, s := range slots {
-			it := agendaItem{ID: agendaHash("event", uid, s.start.Format(time.RFC3339)), Type: "event", Title: plainText(r.summary), Location: agendaLocation(location)}
+			it := agendaItem{ID: agendaHash(b.idKey, "event", uid, s.start.Format(time.RFC3339)), Type: "event", Title: plainText(r.summary), Location: agendaLocation(location)}
 			s.fill(&it)
 			b.items = append(b.items, it)
 		}
@@ -320,7 +377,7 @@ func (b *agendaBuilder) process(r rawEvent) error {
 	}
 	description, _ := e.Props.Text(ical.PropDescription)
 	identity := activityIdentity(r.name, description)
-	course, courseTitle, _ := strings.Cut(location, ":")
+	course, courseTitle, _ := strings.Cut(agendaURLPattern.ReplaceAllString(html.UnescapeString(location), " "), ":")
 	recurring := e.Props.Get(ical.PropRecurrenceRule) != nil
 	label := phaseLabels[r.phase]
 	for _, s := range slots {
@@ -341,7 +398,10 @@ func (b *agendaBuilder) process(r rawEvent) error {
 // buildAgenda returns course activities (one item per phase) and all other feed events whose start falls in [from, until).
 // Problems with course activities or an empty calendar are errors. Problems with other events omit that event and are
 // returned as omitted entries that fall inside the window.
-func buildAgenda(raw []byte, from, until time.Time, instructors map[string]string) ([]agendaItem, []omittedEvent, error) {
+func buildAgenda(raw []byte, from, until time.Time, instructors map[string]string, idKey []byte) ([]agendaItem, []omittedEvent, error) {
+	if len(idKey) != 32 {
+		return nil, nil, errors.New("agenda ID key is unavailable")
+	}
 	cal, err := parseCalendar(raw)
 	if err != nil {
 		return nil, nil, err
@@ -350,7 +410,7 @@ func buildAgenda(raw []byte, from, until time.Time, instructors map[string]strin
 	if len(events) == 0 {
 		return nil, nil, errors.New("empty calendar")
 	}
-	b := &agendaBuilder{from: from, until: until, seen: map[string]bool{}, activities: map[string]map[string]activityPhase{}, items: []agendaItem{}}
+	b := &agendaBuilder{from: from, until: until, idKey: idKey, seen: map[string]bool{}, activities: map[string]map[string]activityPhase{}, items: []agendaItem{}}
 	for _, e := range events {
 		if err := b.add(e); err != nil {
 			return nil, nil, err
@@ -358,7 +418,7 @@ func buildAgenda(raw []byte, from, until time.Time, instructors map[string]strin
 	}
 	for key, phases := range b.activities {
 		for label, p := range phases {
-			it := agendaItem{ID: agendaHash("activity", key, label), Type: "activity", Phase: ptr(label), Title: p.title, Course: nullable(p.course), CourseTitle: nullable(p.courseTitle), Instructor: nullable(plainText(instructors[p.course])), ActivityID: ptr(agendaHash("activity", key))}
+			it := agendaItem{ID: agendaHash(idKey, "activity", key, label), Type: "activity", Phase: ptr(label), Title: p.title, Course: nullable(p.course), CourseTitle: nullable(p.courseTitle), Instructor: nullable(plainText(instructors[p.course])), ActivityID: ptr(agendaHash(idKey, "activity", key))}
 			p.fill(&it)
 			b.items = append(b.items, it)
 		}
@@ -416,7 +476,7 @@ func (a *App) agendaFeed(ctx context.Context) ([]byte, time.Time, error) {
 		if err == nil {
 			from, to := defaultWindow(dayOf(now))
 			var omitted []omittedEvent
-			_, omitted, err = buildAgenda(raw, dayStart(from), dayStart(to.AddDate(0, 0, 1)), nil)
+			_, omitted, err = buildAgenda(raw, dayStart(from), dayStart(to.AddDate(0, 0, 1)), nil, a.settings.key)
 			code = "feed_invalid"
 			if err == nil {
 				c.raw, c.fetchedAt = raw, now
@@ -479,7 +539,7 @@ func (a *App) agenda(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 502, map[string]string{"error": "NBCC feed is unavailable"})
 		return
 	}
-	items, omitted, err := buildAgenda(raw, dayStart(from), dayStart(to.AddDate(0, 0, 1)), a.settings.current().CourseInstructors)
+	items, omitted, err := buildAgenda(raw, dayStart(from), dayStart(to.AddDate(0, 0, 1)), a.settings.current().CourseInstructors, a.settings.key)
 	if err != nil {
 		log.Printf("agenda: %v", err)
 		a.status.setAgendaError("feed_invalid")

@@ -12,6 +12,7 @@ interface ConfirmDialogProps {
   destructive?: boolean
   busy?: boolean
   onConfirm: () => void
+  onCloseAutoFocus?: (event: Event) => void
   children?: ReactNode
 }
 
@@ -25,13 +26,14 @@ export function ConfirmDialog({
   destructive = false,
   busy = false,
   onConfirm,
+  onCloseAutoFocus,
   children,
 }: ConfirmDialogProps) {
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Portal>
         <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <AlertDialog.Content className="fixed top-1/2 left-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-border bg-card p-6 text-card-foreground">
+        <AlertDialog.Content onCloseAutoFocus={onCloseAutoFocus} className="fixed top-1/2 left-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-border bg-card p-6 text-card-foreground">
           <AlertDialog.Title className="text-lg font-semibold text-foreground">{title}</AlertDialog.Title>
           <AlertDialog.Description className="mt-2 text-base text-muted-foreground">
             {description}
