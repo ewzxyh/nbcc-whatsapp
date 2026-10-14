@@ -4,6 +4,7 @@ import { ItemDetailsSheet } from '@/components/agenda/ItemDetailsSheet'
 import { cn } from '@/lib/utils'
 import { AgendaSkeleton } from '@/components/agenda/AgendaStates'
 import { AppHeader } from '@/components/app/AppHeader'
+import { QuickLinks } from '@/components/app/QuickLinks'
 import { FilterPanel } from '@/components/app/FilterPanel'
 import { SearchField } from '@/components/app/SearchField'
 import { SiteFooter } from '@/components/app/SiteFooter'
@@ -262,7 +263,8 @@ export default function App() {
           ) : null}
         </main>
 
-        <div className="mx-auto w-full max-w-5xl">
+        <div className="mx-auto w-full max-w-5xl space-y-12">
+          <QuickLinks />
           <SiteFooter />
         </div>
       </div>
