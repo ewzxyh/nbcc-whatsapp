@@ -230,8 +230,17 @@ func TestCampusJobsDoNotConsumeDeadlineReminders(t *testing.T) {
 	if posts, _ := h.up.snapshot(); posts != 3 {
 		t.Fatal("a campus job swallowed the deadline reminder", h.up.sent)
 	}
-	if strings.Contains(h.up.sent[1], "Lab") || !strings.Contains(h.up.sent[1], "*Campus Today*") || !strings.Contains(h.up.sent[2], "*_14 hours left_*") {
-		t.Fatal("campus events and reminders were mixed", h.up.sent)
+	campusMessages := 0
+	for _, message := range h.up.sent {
+		if strings.Contains(message, "*Campus Today*") {
+			campusMessages++
+			if strings.Contains(message, "*Lab*") {
+				t.Fatal("campus events and reminders were mixed", message)
+			}
+		}
+	}
+	if campusMessages != 1 || !strings.Contains(h.up.sent[2], "*_14 hours left_*") {
+		t.Fatal("campus events or the separate reminder were lost", h.up.sent)
 	}
 }
 
