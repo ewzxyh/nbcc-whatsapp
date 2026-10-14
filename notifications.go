@@ -223,22 +223,20 @@ func (a *App) processPending(ctx context.Context) error {
 				continue
 			}
 		}
-		if err == nil && job.Kind != "" && job.Text == "" {
-			if job.Kind != "reminder" {
-				var recent bool
-				recent, err = a.recentAgenda(ctx, s, p)
-				failureCode = "grapnel_unavailable"
-				if recent {
-					job.Status = "suppressed"
-					if err = a.store.update(job, a.now()); err != nil {
-						return err
-					}
-					continue
+		if err == nil && job.Kind != "" && job.NextPart == 0 {
+			var recent bool
+			recent, err = a.recentAgenda(ctx, s, p)
+			failureCode = "grapnel_unavailable"
+			if recent {
+				job.Status, job.Text = "suppressed", ""
+				if err = a.store.update(job, a.now()); err != nil {
+					return err
 				}
+				continue
 			}
-			if err == nil {
-				p, err = buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL)
-			}
+		}
+		if err == nil && job.Kind != "" && job.Text == "" {
+			p, err = buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL)
 			if err == nil {
 				job.Text, job.FeedHash = p.Text, p.FeedHash
 				err = a.store.update(job, a.now())

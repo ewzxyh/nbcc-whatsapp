@@ -237,6 +237,88 @@ func TestReminderThresholdsUseDueAndSurviveRestart(t *testing.T) {
 	}
 }
 
+func TestRecentAgendaSuppressesAndConsumesReminderStages(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.up.feed = testICS(testEvent("due", "Deadline - Due", ";TZID=America/Halifax:20261014T050000", ""))
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	for i := 0; i < 4; i++ {
+		h.up.messages = append(h.up.messages, groupMessage{ID: fmt.Sprint(i), ChatID: testGroup, IsGroup: true, FromMe: ptrBool(false), Text: "Participant message"})
+	}
+	h.up.messages = append(h.up.messages, groupMessage{ID: "recent-agenda", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: h.up.sent[0]})
+	for stage, advance := range []time.Duration{time.Hour, 10 * time.Hour} {
+		h.clock.advance(advance)
+		if err := h.app.schedule(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.app.processPending(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if posts, _ := h.up.snapshot(); posts != 1 {
+			t.Fatal("unchanged agenda in the latest five was resent for a reminder", stage, posts)
+		}
+		store, err := openStore(h.app.store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.app.store = store
+		if len(store.data.Reminders) != stage+1 {
+			t.Fatal("suppressed reminder stage was not persisted", stage)
+		}
+		h.app.schedule(ctx)
+		h.app.processPending(ctx)
+		if pending, _ := store.counts(); pending != 0 {
+			t.Fatal("suppressed reminder was requeued after restart", pending)
+		}
+	}
+	h.up.feed = strings.Replace(h.up.feed, "Deadline - Due", "Updated Deadline - Due", 1)
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 || !strings.Contains(h.up.sent[1], "Updated Deadline") {
+		t.Fatal("meaningful agenda change was suppressed despite the old agenda remaining visible", posts)
+	}
+}
+
+func TestReminderRetryRechecksRecentConversation(t *testing.T) {
+	for _, failure := range []string{"history", "send"} {
+		t.Run(failure, func(t *testing.T) {
+			h := newHarness(t)
+			ctx := context.Background()
+			h.up.feed = testICS(testEvent("due", "Deadline - Due", ";TZID=America/Halifax:20261014T050000", ""))
+			h.settingsPatch(map[string]any{"sendEnabled": true})
+			h.app.check(ctx)
+			h.app.processPending(ctx)
+			h.clock.advance(time.Hour)
+			h.up.hook = func(r *http.Request) (*http.Response, bool) {
+				if failure == "history" && strings.HasSuffix(r.URL.Path, "/groups/messages") || failure == "send" && r.Method == "POST" {
+					return testResponse(503, `{}`), true
+				}
+				return nil, false
+			}
+			h.app.schedule(ctx)
+			h.app.processPending(ctx)
+			if posts, _ := h.up.snapshot(); posts != 1 {
+				t.Fatal("failed recent-history lookup sent a duplicate reminder", posts)
+			}
+			if pending, _ := h.app.store.counts(); pending != 1 || len(h.app.store.data.Reminders) != 0 {
+				t.Fatal("failure consumed or lost the reminder instead of retrying", pending)
+			}
+			h.up.hook = nil
+			h.up.messages = []groupMessage{{ID: "recent-agenda", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: h.up.sent[0]}}
+			h.clock.advance(2 * time.Minute)
+			h.app.processPending(ctx)
+			if posts, _ := h.up.snapshot(); posts != 1 {
+				t.Fatal("retry ignored the unchanged agenda now visible in the latest five", posts)
+			}
+			if pending, _ := h.app.store.counts(); pending != 0 || len(h.app.store.data.Reminders) != 1 {
+				t.Fatal("suppressed retry did not consume its reminder stage", pending)
+			}
+		})
+	}
+}
+
 func TestDuePassageUpdatesAgendaWithoutFeedChange(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

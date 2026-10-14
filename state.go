@@ -364,5 +364,11 @@ func (s *Store) update(job Job, now time.Time) error {
 	defer s.mu.Unlock()
 	next := s.copyState(now)
 	next.Jobs[job.ID] = job
+	// A reminder suppressed by recent history must not return to the queue on the next tick.
+	if job.Status == "suppressed" {
+		for _, key := range job.ReminderKeys {
+			next.Reminders[key] = job.ExpiresAt
+		}
+	}
 	return s.save(next)
 }
