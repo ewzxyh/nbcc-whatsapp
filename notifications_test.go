@@ -100,7 +100,7 @@ func TestCommandCountdownIsUpdatedAfterHistoryLookup(t *testing.T) {
 		t.Fatal("command response did not use the current remaining time", h.up.sent)
 	}
 	for _, text := range h.up.sent {
-		if !strings.HasSuffix(text, "\n\n🔗 *Full agenda:* https://nbcc.example.test/") {
+		if !strings.HasSuffix(text, "\n\n🔗 *Full agenda:* https://nbcc.example.test/\nType *#NBCC* for the latest agenda.") {
 			t.Fatal("command response omitted the agenda link", text)
 		}
 	}
@@ -309,7 +309,7 @@ func TestAgendaLinkChangeStopsRemainingParts(t *testing.T) {
 		t.Fatal("agenda with the new link was not sent")
 	}
 	for _, text := range h.up.sent[1:] {
-		if !strings.HasSuffix(text, "\n\n🔗 *Full agenda:* https://new.example.test/") || strings.Contains(text, "https://nbcc.example.test/") {
+		if !strings.HasSuffix(text, "\n\n🔗 *Full agenda:* https://new.example.test/\nType *#NBCC* for the latest agenda.") || strings.Contains(text, "https://nbcc.example.test/") {
 			t.Fatal("new batch lost its new agenda link", text)
 		}
 	}

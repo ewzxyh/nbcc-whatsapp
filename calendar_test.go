@@ -186,3 +186,72 @@ func TestTodayCountdownRefreshesBeyond14Hours(t *testing.T) {
 		t.Fatal("warning must precede the activity title", err, p.Text)
 	}
 }
+
+func TestCalendarWeekSectionsKeepFullWindow(t *testing.T) {
+	raw := []byte(testICS(
+		testEvent("today", "Today Lab - Due", ";TZID=America/Halifax:20261013T170000", ""),
+		testEvent("sunday", "Sunday Lab - Due", ";VALUE=DATE:20261018", ""),
+		testEvent("monday", "Monday Quiz - Due", ";VALUE=DATE:20261019", ""),
+		testEvent("next-sunday", "Next Sunday Quiz - Due", ";VALUE=DATE:20261025", ""),
+		testEvent("extra-monday", "Later Lab - Due", ";VALUE=DATE:20261026", ""),
+		testEvent("final", "Final Lab - Due", ";VALUE=DATE:20261027", ""),
+		testEvent("outside", "Outside Lab - Due", ";VALUE=DATE:20261028", ""),
+	))
+	p, err := testPreview(raw, testNow())
+	if err != nil || p.Count != 6 || p.Through != "2026-10-27" {
+		t.Fatal("calendar weeks changed the two-week window", err, p)
+	}
+	this := strings.Index(p.Text, "*THIS WEEK* ----")
+	next := strings.Index(p.Text, "*NEXT WEEK* ----")
+	extra := strings.Index(p.Text, "*OCT 26–OCT 27* ----")
+	if this < 0 || next <= this || extra <= next {
+		t.Fatal("missing or unordered week sections", p.Text)
+	}
+	for _, tc := range []struct {
+		title       string
+		from, until int
+	}{{"*Today Lab*", this, next}, {"*Sunday Lab*", this, next}, {"*Monday Quiz*", next, extra}, {"*Next Sunday Quiz*", next, extra}, {"*Later Lab*", extra, len(p.Text)}, {"*Final Lab*", extra, len(p.Text)}} {
+		at := strings.Index(p.Text, tc.title)
+		if at <= tc.from || at >= tc.until {
+			t.Fatal("activity in the wrong week", tc.title, p.Text)
+		}
+	}
+	if !strings.Contains(p.Text, "*(TODAY) Oct 13*") || strings.Contains(p.Text, "Outside Lab") {
+		t.Fatal("TODAY marker or end boundary changed", p.Text)
+	}
+}
+
+func TestCalendarWeeksAtSundayYearAndDSTBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		now                     time.Time
+		today, monday, laterDay string
+		laterHeader             string
+	}{
+		{time.Date(2026, 10, 18, 14, 0, 0, 0, halifax), "20261018", "20261019", "20261026", "*OCT 26–NOV 1* ----"},
+		{time.Date(2026, 10, 19, 14, 0, 0, 0, halifax), "20261019", "20261026", "20261102", "*NOV 2* ----"},
+		{time.Date(2026, 12, 27, 14, 0, 0, 0, halifax), "20261227", "20261228", "20270104", "*JAN 4–JAN 10* ----"},
+		{time.Date(2026, 11, 1, 14, 0, 0, 0, halifax), "20261101", "20261102", "20261109", "*NOV 9–NOV 15* ----"},
+	} {
+		raw := []byte(testICS(testEvent("today", "Today - Due", ";VALUE=DATE:"+tc.today, ""), testEvent("next", "Next - Due", ";VALUE=DATE:"+tc.monday, ""), testEvent("later", "Later - Due", ";VALUE=DATE:"+tc.laterDay, "")))
+		p, err := testPreview(raw, tc.now)
+		if err != nil || p.Count != 3 {
+			t.Fatal(tc.now, err, p)
+		}
+		this, next, later := strings.Index(p.Text, "*THIS WEEK* ----"), strings.Index(p.Text, "*NEXT WEEK* ----"), strings.Index(p.Text, tc.laterHeader)
+		if this < 0 || next <= this || later <= next || strings.Index(p.Text, "*Today*:") >= next || strings.Index(p.Text, "*Next*:") <= next || strings.Index(p.Text, "*Next*:") >= later || strings.Index(p.Text, "*Later*:") <= later {
+			t.Fatal("incorrect calendar-week boundary", tc.now, p.Text)
+		}
+	}
+}
+
+func TestWeekRolloverRefreshesWeekLabels(t *testing.T) {
+	raw := []byte(testICS(testEvent("future", "Upcoming Lab - Due", ";VALUE=DATE:20261020", "")))
+	sunday, err := testPreview(raw, time.Date(2026, 10, 18, 14, 0, 0, 0, halifax))
+	if err != nil {
+		t.Fatal(err)
+	}
+	monday, err := testPreview(raw, time.Date(2026, 10, 19, 14, 0, 0, 0, halifax))
+	if err != nil || sunday.Count != 1 || monday.Count != 1 || sunday.FeedHash == monday.FeedHash || !strings.Contains(sunday.Text, "*NEXT WEEK* ----") || !strings.Contains(monday.Text, "*THIS WEEK* ----") {
+		t.Fatal("same activity retained the old week label", err, sunday.Text, monday.Text)
+	}
+}

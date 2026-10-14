@@ -215,7 +215,7 @@ func TestLongAgendaSplitsWithoutLosingContent(t *testing.T) {
 }
 
 func TestEveryMessagePartKeepsAgendaLink(t *testing.T) {
-	footer := "\n\n🔗 *Full agenda:* https://nbcc.example.test/"
+	footer := "\n\n🔗 *Full agenda:* https://nbcc.example.test/\nType *#NBCC* for the latest agenda."
 	text := strings.Repeat("• Linux I — Lab: Due at *23:59*.\n", 200) + strings.Repeat("📚", 3000)
 	parts := messageParts(text + footer)
 	if len(parts) < 2 {
@@ -245,7 +245,7 @@ func TestPreviewKeepsLinkForActivitiesAndEmptyAgenda(t *testing.T) {
 	for _, event := range []string{testEvent("lab", "Lab - Due", ";VALUE=DATE:20261014", ""), testEvent("campus", "Campus", ";VALUE=DATE:20261014", "")} {
 		h.up.feed = testICS(event)
 		p, err := h.app.preview(context.Background(), h.app.settings.current())
-		if err != nil || !strings.HasSuffix(p.Text, "\n\n🔗 *Full agenda:* https://nbcc.example.test/") {
+		if err != nil || !strings.HasSuffix(p.Text, "\n\n🔗 *Full agenda:* https://nbcc.example.test/\nType *#NBCC* for the latest agenda.") {
 			t.Fatal("preview is missing the configured public link", err, p.Text)
 		}
 	}

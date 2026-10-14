@@ -148,9 +148,34 @@ func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string)
 	})
 	var canonical, b strings.Builder
 	fmt.Fprintf(&b, "📚 *NBCC — Next 2 Weeks*\n📅 *%s–%s*\n", start.Format("Jan 2"), end.AddDate(0, 0, -1).Format("Jan 2, 2006"))
+	nextWeek := start.AddDate(0, 0, 7-(int(start.Weekday())+6)%7)
+	laterWeek := nextWeek.AddDate(0, 0, 7)
+	lastWeek := -1
 	lastDate := ""
 	for _, r := range rows {
-		fmt.Fprintf(&canonical, "%d:%s\n", len(r.identity), r.identity)
+		week := 0
+		if !r.at.Before(nextWeek) {
+			week = 1
+		}
+		if !r.at.Before(laterWeek) {
+			week = 2
+		}
+		if week != lastWeek {
+			label := "THIS WEEK"
+			if week == 1 {
+				label = "NEXT WEEK"
+			} else if week == 2 {
+				label = laterWeek.Format("Jan 2")
+				if last := end.AddDate(0, 0, -1); !last.Equal(laterWeek) {
+					label += "–" + last.Format("Jan 2")
+				}
+				label = strings.ToUpper(label)
+			}
+			fmt.Fprintf(&b, "\n*%s* ----\n", label)
+			lastWeek = week
+		}
+		// Refresh the labels when an unchanged activity moves from NEXT WEEK to THIS WEEK.
+		fmt.Fprintf(&canonical, "%d:%d:%s\n", week, len(r.identity), r.identity)
 		day := r.at.Format("Jan 2")
 		if day != lastDate {
 			lastDate = day
@@ -166,7 +191,7 @@ func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string)
 	}
 	p.Text = strings.TrimSpace(b.String())
 	if publicBaseURL != "" {
-		footer := agendaLinkLabel + strings.TrimRight(publicBaseURL, "/") + "/"
+		footer := agendaLinkLabel + strings.TrimRight(publicBaseURL, "/") + "/\nType *#NBCC* for the latest agenda."
 		p.Text += footer
 		canonical.WriteString(footer)
 	}
