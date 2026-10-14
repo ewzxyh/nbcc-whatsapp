@@ -84,7 +84,7 @@ function EntryCardBase({ entry, showDate = false, onSelect }: EntryCardProps) {
         </button>
 
         <div className="flex flex-col gap-3 border-t border-border p-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-          <ProgressControl storageKey={progressKeyOf(entry)} title={entry.title} />
+          {entry.kind === 'activity' && <ProgressControl storageKey={progressKeyOf(entry)} title={entry.title} />}
           <CopyButton entry={entry} />
         </div>
       </article>

@@ -98,13 +98,15 @@ function EntryDetails({ entry, allItems }: { entry: AgendaEntry; allItems: Agend
       </SheetHeader>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 pb-4">
-        <section aria-labelledby="sheet-progress-label" className="space-y-2">
-          <p id="sheet-progress-label" className="text-base font-medium text-foreground">
-            Progress
-          </p>
-          <ProgressControl storageKey={progressKeyOf(entry)} title={entry.title} />
-          <p className="text-sm text-muted-foreground">Saved in this browser for 365 days.</p>
-        </section>
+        {entry.kind === 'activity' && (
+          <section aria-labelledby="sheet-progress-label" className="space-y-2">
+            <p id="sheet-progress-label" className="text-base font-medium text-foreground">
+              Progress
+            </p>
+            <ProgressControl storageKey={progressKeyOf(entry)} title={entry.title} />
+            <p className="text-sm text-muted-foreground">Saved in this browser for 365 days.</p>
+          </section>
+        )}
 
         <dl className="space-y-5">
           {entry.kind === 'activity' &&
