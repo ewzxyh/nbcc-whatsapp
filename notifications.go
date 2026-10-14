@@ -46,7 +46,7 @@ func (a *App) checkLocked(ctx context.Context) (bool, bool, error) {
 	raw, err := a.fetchFeed(ctx, s.NBCCFeedURL)
 	var p Preview
 	if err == nil {
-		p, err = buildPreview(raw, a.now(), a.settings.key)
+		p, err = buildPreview(raw, a.now(), a.settings.key, s.PublicBaseURL)
 	}
 	code := ""
 	if err != nil {
@@ -82,7 +82,7 @@ func (a *App) schedule(ctx context.Context) error {
 			return err
 		}
 	}
-	p, err := buildPreview(a.monitorRaw, a.now(), a.settings.key)
+	p, err := buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL)
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func (a *App) processPending(ctx context.Context) error {
 		if j.Kind != "" {
 			_, _, previewErr = a.checkLocked(ctx)
 			if previewErr == nil {
-				p, previewErr = buildPreview(a.monitorRaw, a.now(), a.settings.key)
+				p, previewErr = buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL)
 				if previewErr == nil {
 					previewErr = a.store.queueReminders(p, deliveryTarget(s, a.settings.key), a.now())
 				}
@@ -235,6 +235,9 @@ func (a *App) processPending(ctx context.Context) error {
 					}
 					continue
 				}
+			}
+			if err == nil {
+				p, err = buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL)
 			}
 			if err == nil {
 				job.Text, job.FeedHash = p.Text, p.FeedHash

@@ -21,6 +21,14 @@ func isolateLegacyEnv(t *testing.T) {
 	}
 }
 
+func TestSendingRequiresPublicAgendaLink(t *testing.T) {
+	s := testSettingsSeed()
+	s.SendEnabled, s.PublicBaseURL = true, ""
+	if checkCrossFields(s)["publicBaseUrl"] != "required" {
+		t.Fatal("sending without the required agenda link was permitted")
+	}
+}
+
 func manyInstructors(n int) map[string]string {
 	m := map[string]string{}
 	for i := 0; i < n; i++ {

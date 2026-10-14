@@ -75,6 +75,37 @@ func TestCommandCooldownAndRecentConversation(t *testing.T) {
 	}
 }
 
+func TestCommandCountdownIsUpdatedAfterHistoryLookup(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.clock.advance(-8 * time.Hour)
+	h.up.feed = testICS(testEvent("today", "Lab Today - Due", ";TZID=America/Halifax:20261013T235900", ""))
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.command(groupMessage{ID: "first"}, h.app.settings.current())
+	if err := h.app.processPending(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.advance(16 * time.Minute)
+	h.up.hook = func(r *http.Request) (*http.Response, bool) {
+		if strings.HasSuffix(r.URL.Path, "/groups/messages") {
+			h.clock.advance(3 * time.Minute)
+		}
+		return nil, false
+	}
+	h.app.command(groupMessage{ID: "latest"}, h.app.settings.current())
+	if err := h.app.processPending(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if posts, _ := h.up.snapshot(); posts != 2 || !strings.Contains(h.up.sent[0], "*_17h 59m left_*") || !strings.Contains(h.up.sent[1], "*_17h 40m left_*") {
+		t.Fatal("command response did not use the current remaining time", h.up.sent)
+	}
+	for _, text := range h.up.sent {
+		if !strings.HasSuffix(text, "\n\n🔗 *Full agenda:* https://nbcc.example.test/") {
+			t.Fatal("command response omitted the agenda link", text)
+		}
+	}
+}
+
 func ptrBool(v bool) *bool { return &v }
 
 func TestDisableStopsRemainingMessageParts(t *testing.T) {
@@ -245,6 +276,41 @@ func TestDuePassageStopsRemainingAgendaParts(t *testing.T) {
 	for _, text := range h.up.sent[1:] {
 		if strings.Contains(text, "Expiring") {
 			t.Fatal("expired Due appeared in the rebuilt batch", text)
+		}
+	}
+}
+
+func TestAgendaLinkChangeStopsRemainingParts(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	var events []string
+	for i := 0; i < 80; i++ {
+		events = append(events, testEvent(fmt.Sprint(i), fmt.Sprint(i)+strings.Repeat("Long title ", 8)+" - Due", ";VALUE=DATE:20261015", ""))
+	}
+	h.up.feed = testICS(events...)
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	h.up.hook = func(r *http.Request) (*http.Response, bool) {
+		if r.Method == "POST" {
+			h.settingsPatch(map[string]any{"publicBaseUrl": "https://new.example.test"})
+		}
+		return nil, false
+	}
+	if err := h.app.processPending(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if posts, _ := h.up.snapshot(); posts != 1 {
+		t.Fatal("continued sending with the old agenda link", posts)
+	}
+	h.up.hook = nil
+	h.app.schedule(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts < 2 {
+		t.Fatal("agenda with the new link was not sent")
+	}
+	for _, text := range h.up.sent[1:] {
+		if !strings.HasSuffix(text, "\n\n🔗 *Full agenda:* https://new.example.test/") || strings.Contains(text, "https://nbcc.example.test/") {
+			t.Fatal("new batch lost its new agenda link", text)
 		}
 	}
 }
