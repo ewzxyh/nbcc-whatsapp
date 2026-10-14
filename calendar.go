@@ -20,6 +20,8 @@ import (
 var halifax, _ = time.LoadLocation("America/Halifax")
 var nbccActivityLinks = regexp.MustCompile(`https://elearning\.nbcc\.ca/[^\s<>"']+`)
 
+const agendaLinkLabel = "\n\n🔗 *Full agenda:* "
+
 type Preview struct {
 	Text          string    `json:"text"`
 	From          string    `json:"from"`
@@ -84,7 +86,7 @@ type deadline struct {
 	At time.Time
 }
 
-func buildPreview(raw []byte, now time.Time, idKey []byte) (Preview, error) {
+func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string) (Preview, error) {
 	start := midnight(now)
 	end := start.AddDate(0, 0, 15)
 	p := Preview{From: start.Format(dateLayout), Through: end.AddDate(0, 0, -1).Format(dateLayout), FetchedAt: now, validUntil: start.AddDate(0, 0, 1)}
@@ -126,13 +128,15 @@ func buildPreview(raw []byte, now time.Time, idKey []byte) (Preview, error) {
 		text := "• " + course + title + ": Due" + when + "."
 		// Compare visible content, excluding the moving heading and countdown labels.
 		identity := it.at.Format(time.RFC3339) + "\x00" + text
-		if left := at.Sub(now); left <= 14*time.Hour {
+		if left := at.Sub(now); left <= 14*time.Hour || midnight(it.at).Equal(start) {
 			minutes := int((left + time.Minute - 1) / time.Minute)
 			warning := fmt.Sprintf("%d hours left", (minutes+59)/60)
 			if minutes%60 != 0 {
 				warning = fmt.Sprintf("%dh %02dm left", minutes/60, minutes%60)
+			} else if minutes == 60 {
+				warning = "1 hour left"
 			}
-			text = strings.Replace(text, title, "⚠️ *_"+warning+"_* "+title, 1)
+			text = "• " + course + "⚠️ *_" + warning + "_* " + title + ": Due" + when + "."
 		}
 		rows = append(rows, row{it.at.In(halifax), text, identity})
 	}
@@ -160,9 +164,14 @@ func buildPreview(raw []byte, now time.Time, idKey []byte) (Preview, error) {
 	if len(rows) == 0 {
 		b.WriteString("\n• No upcoming labs, quizzes or assignments with a Due date in this period.\n")
 	}
+	p.Text = strings.TrimSpace(b.String())
+	if publicBaseURL != "" {
+		footer := agendaLinkLabel + strings.TrimRight(publicBaseURL, "/") + "/"
+		p.Text += footer
+		canonical.WriteString(footer)
+	}
 	hash := sha256.Sum256([]byte(canonical.String()))
 	p.FeedHash = hex.EncodeToString(hash[:])
-	p.Text = strings.TrimSpace(b.String())
 	p.Count = len(rows)
 	return p, nil
 }

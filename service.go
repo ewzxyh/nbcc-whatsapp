@@ -103,7 +103,7 @@ func (a *App) preview(ctx context.Context, s Settings) (Preview, error) {
 	if err != nil {
 		return Preview{}, err
 	}
-	return buildPreview(raw, a.now(), a.settings.key)
+	return buildPreview(raw, a.now(), a.settings.key, s.PublicBaseURL)
 }
 
 func jsonResponse(w http.ResponseWriter, status int, body any) {

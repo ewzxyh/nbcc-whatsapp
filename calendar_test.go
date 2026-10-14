@@ -7,7 +7,7 @@ import (
 )
 
 func testPreview(raw []byte, now time.Time) (Preview, error) {
-	return buildPreview(raw, now, make([]byte, 32))
+	return buildPreview(raw, now, make([]byte, 32), "https://nbcc.example.test")
 }
 
 func testNow() time.Time {
@@ -160,5 +160,29 @@ func TestDateOnlyDueExpiresAtEndOfLocalDate(t *testing.T) {
 		if err != nil || p.Count != tc.want {
 			t.Fatal(tc.now, p.Count, err)
 		}
+	}
+}
+
+func TestTodayCountdownRefreshesBeyond14Hours(t *testing.T) {
+	raw := []byte(testICS(testEvent("today", "Lab Today - Due", ";TZID=America/Halifax:20261013T235900", ""), testEvent("later", "Quiz Tomorrow - Due", ";VALUE=DATE:20261014", "")))
+	now := time.Date(2026, 10, 13, 6, 0, 0, 0, halifax)
+	first, err := testPreview(raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, err := testPreview(raw, now.Add(25*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(first.Text, "⚠️ *_17h 59m left_* *Lab Today*") || !strings.Contains(later.Text, "⚠️ *_17h 34m left_* *Lab Today*") {
+		t.Fatal("today's countdown was missing or stale", first.Text, later.Text)
+	}
+	if first.FeedHash != later.FeedHash || strings.Count(later.Text, "left_*") != 1 {
+		t.Fatal("countdown created a feed change or warned about a distant deadline")
+	}
+	sameName := []byte(testICS(testEvent("same", "Linux I - Due", ";TZID=America/Halifax:20261013T070000", "")))
+	p, err := testPreview(sameName, now)
+	if err != nil || !strings.Contains(p.Text, "• *Linux I* — ⚠️ *_1 hour left_* *Linux I*: Due") {
+		t.Fatal("warning must precede the activity title", err, p.Text)
 	}
 }

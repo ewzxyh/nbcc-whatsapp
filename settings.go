@@ -330,7 +330,7 @@ func (st *SettingsStore) update(raw map[string]json.RawMessage) ([]string, error
 	st.cur = next
 	for _, field := range changed {
 		switch field {
-		case "sendEnabled", "nbccFeedUrl", "grapnelApiKey", "grapnelInstanceId", "grapnelGroupJid":
+		case "sendEnabled", "nbccFeedUrl", "grapnelApiKey", "grapnelInstanceId", "grapnelGroupJid", "publicBaseUrl":
 			st.deliveryRevision++
 		}
 	}
@@ -352,6 +352,9 @@ func checkCrossFields(s Settings) map[string]string {
 	errs := map[string]string{}
 	if s.SendEnabled && !s.grapnelSendReady() {
 		errs["sendEnabled"] = "missing_grapnel_config"
+	}
+	if s.SendEnabled && s.PublicBaseURL == "" {
+		errs["publicBaseUrl"] = "required"
 	}
 	return errs
 }

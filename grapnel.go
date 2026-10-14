@@ -159,12 +159,20 @@ func (a *App) sendText(ctx context.Context, s Settings, text, key string) error 
 }
 
 func messageParts(text string) []string {
+	footer := ""
+	if at := strings.LastIndex(text, agendaLinkLabel); at >= 0 {
+		footer, text = text[at:], text[:at]
+	}
+	limit := 4096 - len(utf16.Encode([]rune(footer)))
+	if limit < 2 {
+		return nil
+	}
 	var parts []string
 	for len(text) > 0 {
 		units, end, lastLine := 0, 0, 0
 		for end < len(text) {
 			r, size := utf8.DecodeRuneInString(text[end:])
-			if units+utf16.RuneLen(r) > 4096 {
+			if units+utf16.RuneLen(r) > limit {
 				break
 			}
 			units += utf16.RuneLen(r)
@@ -178,7 +186,7 @@ func messageParts(text string) []string {
 		}
 		part := strings.TrimSpace(text[:end])
 		if part != "" {
-			parts = append(parts, part)
+			parts = append(parts, part+footer)
 		}
 		text = text[end:]
 	}

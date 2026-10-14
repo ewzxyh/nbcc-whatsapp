@@ -214,6 +214,43 @@ func TestLongAgendaSplitsWithoutLosingContent(t *testing.T) {
 	}
 }
 
+func TestEveryMessagePartKeepsAgendaLink(t *testing.T) {
+	footer := "\n\n🔗 *Full agenda:* https://nbcc.example.test/"
+	text := strings.Repeat("• Linux I — Lab: Due at *23:59*.\n", 200) + strings.Repeat("📚", 3000)
+	parts := messageParts(text + footer)
+	if len(parts) < 2 {
+		t.Fatal("long agenda was not split")
+	}
+	var content strings.Builder
+	for _, part := range parts {
+		if len(utf16.Encode([]rune(part))) > 4096 || !strings.HasSuffix(part, footer) || strings.Count(part, "https://nbcc.example.test/") != 1 {
+			t.Fatal("part exceeded the limit or lost/duplicated its agenda link")
+		}
+		content.WriteString(strings.TrimSuffix(part, footer))
+	}
+	if strings.ReplaceAll(content.String(), "\n", "") != strings.ReplaceAll(text, "\n", "") {
+		t.Fatal("content lost while repeating the link")
+	}
+	limit := 4096 - len(utf16.Encode([]rune(footer)))
+	if len(messageParts(strings.Repeat("x", limit)+footer)) != 1 || len(messageParts(strings.Repeat("x", limit+1)+footer)) != 2 {
+		t.Fatal("footer was not included in the message length budget")
+	}
+	if len(messageParts("body"+agendaLinkLabel+strings.Repeat("x", 4096))) != 0 {
+		t.Fatal("oversized footer was accepted")
+	}
+}
+
+func TestPreviewKeepsLinkForActivitiesAndEmptyAgenda(t *testing.T) {
+	h := newHarness(t)
+	for _, event := range []string{testEvent("lab", "Lab - Due", ";VALUE=DATE:20261014", ""), testEvent("campus", "Campus", ";VALUE=DATE:20261014", "")} {
+		h.up.feed = testICS(event)
+		p, err := h.app.preview(context.Background(), h.app.settings.current())
+		if err != nil || !strings.HasSuffix(p.Text, "\n\n🔗 *Full agenda:* https://nbcc.example.test/") {
+			t.Fatal("preview is missing the configured public link", err, p.Text)
+		}
+	}
+}
+
 func TestRetryDoesNotResendAcceptedParts(t *testing.T) {
 	h := newHarness(t)
 	h.settingsPatch(map[string]any{"sendEnabled": true})
