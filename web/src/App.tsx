@@ -1,7 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleAlert, Info, RefreshCw } from 'lucide-react'
 import { ItemDetailsSheet } from '@/components/agenda/ItemDetailsSheet'
-import { cn } from '@/lib/utils'
 import { AgendaSkeleton } from '@/components/agenda/AgendaStates'
 import { AppHeader } from '@/components/app/AppHeader'
 import { QuickLinks } from '@/components/app/QuickLinks'
@@ -147,7 +146,7 @@ export default function App() {
         Skip to agenda
       </a>
 
-      {/* The page shell is always wide enough for Board. Header and filters keep one width on every view. */}
+      {/* Every view uses the same width, so the Board columns fill the same space as the list views. */}
       <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 md:py-8">
         <div className="mx-auto w-full max-w-5xl space-y-6">
           <AppHeader
@@ -174,10 +173,7 @@ export default function App() {
           id="agenda"
           tabIndex={-1}
           aria-busy={loading}
-          className={cn(
-            'mx-auto w-full space-y-6 outline-none',
-            view === 'board' ? 'max-w-7xl' : 'max-w-5xl',
-          )}
+          className="mx-auto w-full max-w-5xl space-y-6 outline-none"
         >
           <ViewSwitcher value={view} onChange={setView} />
 
