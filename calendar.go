@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -22,18 +21,14 @@ var halifax, _ = time.LoadLocation("America/Halifax")
 var nbccActivityLinks = regexp.MustCompile(`https://elearning\.nbcc\.ca/[^\s<>"']+`)
 
 type Preview struct {
-	Text      string    `json:"text"`
-	From      string    `json:"from"`
-	Through   string    `json:"through"`
-	Count     int       `json:"activities"`
-	FeedHash  string    `json:"feed_hash"`
-	FetchedAt time.Time `json:"fetched_at"`
-}
-
-type activity struct {
-	title, course string
-	dates         map[string][]time.Time
-	allDay        map[string]bool
+	Text          string    `json:"text"`
+	From          string    `json:"from"`
+	Through       string    `json:"through"`
+	Count         int       `json:"activities"`
+	FeedHash      string    `json:"feed_hash"`
+	FetchedAt     time.Time `json:"fetched_at"`
+	OmittedEvents int       `json:"omitted_events"`
+	deadlines     []deadline
 }
 
 func midnight(t time.Time) time.Time {
@@ -63,8 +58,8 @@ func parseCalendar(raw []byte) (*ical.Calendar, error) {
 	return cal, nil
 }
 
-func activityIdentity(name, description string) string {
-	identity := name
+func activityIdentity(uid, description string) string {
+	identity := "uid:" + uid
 	for _, link := range nbccActivityLinks.FindAllString(description, -1) {
 		u, err := url.Parse(html.UnescapeString(link))
 		if err != nil {
@@ -76,149 +71,114 @@ func activityIdentity(name, description string) string {
 				break
 			}
 		}
-		if identity != name {
+		if identity != "uid:"+uid {
 			break
 		}
 	}
 	return identity
 }
 
-func buildPreview(raw []byte, now time.Time) (Preview, error) {
+type deadline struct {
+	ID string
+	At time.Time
+}
+
+func buildPreview(raw []byte, now time.Time, idKey []byte) (Preview, error) {
 	start := midnight(now)
-	end := start.AddDate(0, 0, 15) // Today through today+14, including the last day.
-	p := Preview{From: start.Format("2006-01-02"), Through: end.AddDate(0, 0, -1).Format("2006-01-02"), FetchedAt: now}
-	cal, err := parseCalendar(raw)
+	end := start.AddDate(0, 0, 15)
+	p := Preview{From: start.Format(dateLayout), Through: end.AddDate(0, 0, -1).Format(dateLayout), FetchedAt: now}
+	items, omitted, err := buildAgenda(raw, start, end, nil, idKey)
 	if err != nil {
 		return p, err
 	}
-	seen := map[string]bool{}
-	var canonical []*ical.Component
-	activities := map[string]*activity{}
-	for _, e := range cal.Events() {
-		uid, err := e.Props.Text(ical.PropUID)
-		if err != nil || uid == "" || seen[uid] {
-			return p, errors.New("missing or duplicate calendar UID")
-		}
-		seen[uid] = true
-		if e.Props.Get(ical.PropRecurrenceID) != nil {
-			return p, errors.New("recurrence overrides require review before sending")
-		}
-		delete(e.Props, ical.PropDateTimeStamp) // Brightspace regenerates this on every fetch.
-		canonical = append(canonical, e.Component)
-		title, err := e.Props.Text(ical.PropSummary)
-		if err != nil {
-			return p, errors.New("invalid event title")
-		}
-		date, err := e.DateTimeStart(halifax)
-		if err != nil || date.IsZero() {
-			return p, errors.New("invalid event date")
-		}
-		name, phase := eventTitle(title)
-		if phase == "" || e.Props.Get(ical.PropStatus) != nil && e.Props.Get(ical.PropStatus).Value == "CANCELLED" {
+	p.OmittedEvents = len(omitted)
+	groups := map[string]map[string]agendaItem{}
+	for _, it := range items {
+		if it.Type != "activity" {
 			continue
 		}
-		course, err := e.Props.Text(ical.PropLocation)
-		if err != nil {
-			return p, errors.New("invalid event location")
+		id := *it.ActivityID
+		if groups[id] == nil {
+			groups[id] = map[string]agendaItem{}
 		}
-		course, _, _ = strings.Cut(course, ":")
-		description, _ := e.Props.Text(ical.PropDescription)
-		identity := activityIdentity(name, description)
-		allDay := e.Props.Get(ical.PropDateTimeStart).ValueType() == ical.ValueDate
-		dates := []time.Time{date}
-		recurring := e.Props.Get(ical.PropRecurrenceRule) != nil
-		if recurring {
-			rule := e.Props.Get(ical.PropRecurrenceRule).Value
-			if strings.Contains(rule, "FREQ=HOURLY") || strings.Contains(rule, "FREQ=MINUTELY") || strings.Contains(rule, "FREQ=SECONDLY") {
-				return p, errors.New("unexpected high-frequency recurrence")
-			}
-			set, err := e.RecurrenceSet(halifax)
-			if err != nil {
-				return p, errors.New("invalid event recurrence")
-			}
-			dates = set.Between(start, end, false)
-			if set.Before(start, true).Equal(start) {
-				dates = append(dates, start)
-			}
-		} else if e.Props.Get(ical.PropRecurrenceDates) != nil || e.Props.Get(ical.PropExceptionDates) != nil {
-			return p, errors.New("standalone recurrence exceptions require review")
-		}
-		for _, d := range dates {
-			d = d.In(halifax)
-			if d.Before(start) || !d.Before(end) {
-				continue
-			}
-			key := course + "\x00" + identity
-			if recurring {
-				key += "\x00" + d.Format("2006-01-02")
-			}
-			a := activities[key]
-			if a == nil {
-				a = &activity{title: cleanText(name), course: cleanText(course), dates: map[string][]time.Time{}, allDay: map[string]bool{}}
-				activities[key] = a
-			}
-			a.dates[phase] = append(a.dates[phase], d)
-			a.allDay[phase] = allDay
-		}
+		groups[id][*it.Phase] = it
 	}
-	if len(seen) == 0 {
-		return p, errors.New("empty calendar; refusing to replace the last baseline")
-	}
-	sort.Slice(canonical, func(i, j int) bool {
-		return canonical[i].Props.Get(ical.PropUID).Value < canonical[j].Props.Get(ical.PropUID).Value
-	})
-	canonicalJSON, err := json.Marshal(canonical)
-	if err != nil {
-		return p, err
-	}
-	hash := sha256.Sum256(canonicalJSON)
-	p.FeedHash = hex.EncodeToString(hash[:])
 	type row struct {
-		date time.Time
-		text string
+		at             time.Time
+		text, identity string
 	}
-	var rows []row
-	for _, a := range activities {
-		for phase := range a.dates {
-			sort.Slice(a.dates[phase], func(i, j int) bool { return a.dates[phase][i].Before(a.dates[phase][j]) })
+	rows := []row{}
+	for id, phases := range groups {
+		it, ok := phases["due"]
+		label := "due"
+		if !ok {
+			it, ok = phases["available"]
+			label = "available"
 		}
-		phase := "Due"
-		if len(a.dates[phase]) == 0 {
-			phase = "Available"
+		if !ok {
+			it = phases["closes"]
+			label = "access closes"
 		}
-		if len(a.dates[phase]) == 0 {
-			phase = "Availability Ends"
-		}
-		date := a.dates[phase][0]
-		label := map[string]string{"Due": "due", "Available": "available", "Availability Ends": "access closes"}[phase]
 		when := " on this date"
-		if !a.allDay[phase] {
-			when = " at *" + date.Format("15:04") + "*"
+		if !it.AllDay {
+			when = " at *" + it.at.In(halifax).Format("15:04") + "*"
 		}
-		text := "• " + a.course + " — " + a.title + ": " + label + when + "."
-		if ends := a.dates["Availability Ends"]; phase != "Availability Ends" && len(ends) > 0 && !ends[0].Equal(date) {
-			close := ends[0].Format("15:04")
-			if midnight(ends[0]) != midnight(date) {
-				close = ends[0].Format("Jan 2 at 15:04")
+		course := ""
+		if it.Course != nil {
+			course = "*" + *it.Course + "* — "
+		}
+		title := "*" + it.Title + "*"
+		text := "• " + course + title + ": " + label + when + "."
+		if closes, ok := phases["closes"]; ok && label != "access closes" && !closes.at.Equal(it.at) {
+			close := closes.at.In(halifax).Format("15:04")
+			if closes.AllDay {
+				close = closes.at.Format("Jan 2")
+			} else if !midnight(closes.at).Equal(midnight(it.at)) {
+				close = closes.at.Format("Jan 2 at 15:04")
 			}
-			text += " Access closes at " + close + "."
+			text += " Access closes "
+			if !closes.AllDay {
+				text += "at "
+			} else {
+				text += "on "
+			}
+			text += close + "."
 		}
-		rows = append(rows, row{date, text})
+		// Compare visible content, excluding the moving heading and countdown labels.
+		identity := it.at.Format(time.RFC3339) + "\x00" + text
+		if due, ok := phases["due"]; ok {
+			at := due.at
+			// A date-only delivery deadline lasts through the end of that local date.
+			if due.AllDay {
+				at = midnight(at).AddDate(0, 0, 1).Add(-time.Second)
+			}
+			p.deadlines = append(p.deadlines, deadline{ID: id, At: at})
+			if left := at.Sub(now); left > 0 && left <= 14*time.Hour {
+				minutes := int((left + time.Minute - 1) / time.Minute)
+				warning := fmt.Sprintf("%d hours left", (minutes+59)/60)
+				if minutes%60 != 0 {
+					warning = fmt.Sprintf("%dh %02dm left", minutes/60, minutes%60)
+				}
+				text = strings.Replace(text, title, "⚠️ *_"+warning+"_* "+title, 1)
+			}
+		}
+		rows = append(rows, row{it.at.In(halifax), text, identity})
 	}
 	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].date.Equal(rows[j].date) {
-			return rows[i].text < rows[j].text
+		if rows[i].at.Equal(rows[j].at) {
+			return rows[i].identity < rows[j].identity
 		}
-		return rows[i].date.Before(rows[j].date)
+		return rows[i].at.Before(rows[j].at)
 	})
-	var b strings.Builder
+	var canonical, b strings.Builder
 	fmt.Fprintf(&b, "📚 *NBCC — Next 2 Weeks*\n📅 *%s–%s*\n", start.Format("Jan 2"), end.AddDate(0, 0, -1).Format("Jan 2, 2006"))
 	lastDate := ""
 	for _, r := range rows {
-		day := r.date.Format("Jan 2")
+		fmt.Fprintf(&canonical, "%d:%s\n", len(r.identity), r.identity)
+		day := r.at.Format("Jan 2")
 		if day != lastDate {
 			lastDate = day
-			if midnight(r.date).Equal(start) {
+			if midnight(r.at).Equal(start) {
 				day = "(TODAY) " + day
 			}
 			fmt.Fprintf(&b, "\n*%s*\n", day)
@@ -228,6 +188,8 @@ func buildPreview(raw []byte, now time.Time) (Preview, error) {
 	if len(rows) == 0 {
 		b.WriteString("\n• No scheduled labs, quizzes or assignments in this period.\n")
 	}
+	hash := sha256.Sum256([]byte(canonical.String()))
+	p.FeedHash = hex.EncodeToString(hash[:])
 	p.Text = strings.TrimSpace(b.String())
 	p.Count = len(rows)
 	return p, nil

@@ -85,11 +85,12 @@ func (e *validationError) Error() string { return "validation failed" }
 
 // SettingsStore keeps the current settings in memory and persists them encrypted under the state directory.
 type SettingsStore struct {
-	mu      sync.RWMutex
-	path    string
-	key     []byte
-	cur     Settings
-	changed chan struct{}
+	mu               sync.RWMutex
+	path             string
+	key              []byte
+	cur              Settings
+	changed          chan struct{}
+	deliveryRevision uint64
 }
 
 // openSettings loads <dir>/settings.json. When the file does not exist, seed supplies the initial values
@@ -327,11 +328,23 @@ func (st *SettingsStore) update(raw map[string]json.RawMessage) ([]string, error
 		return nil, err
 	}
 	st.cur = next
+	for _, field := range changed {
+		switch field {
+		case "sendEnabled", "nbccFeedUrl", "grapnelApiKey", "grapnelInstanceId", "grapnelGroupJid":
+			st.deliveryRevision++
+		}
+	}
 	select {
 	case st.changed <- struct{}{}:
 	default:
 	}
 	return changed, nil
+}
+
+func (st *SettingsStore) deliverySnapshot() (Settings, uint64) {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.cur.clone(), st.deliveryRevision
 }
 
 // checkCrossFields enforces rules that involve more than one field.

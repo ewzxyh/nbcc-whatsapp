@@ -19,17 +19,23 @@ import (
 )
 
 type App struct {
-	cfg      Config
-	client   *http.Client
-	store    *Store
-	settings *SettingsStore
-	admin    *AdminStore
-	audit    *auditLog
-	sessions *sessionStore
-	limiter  *attemptLimiter
-	status   *runtimeStatus
-	now      func() time.Time
-	feed     feedCache
+	cfg               Config
+	client            *http.Client
+	store             *Store
+	settings          *SettingsStore
+	admin             *AdminStore
+	audit             *auditLog
+	sessions          *sessionStore
+	limiter           *attemptLimiter
+	status            *runtimeStatus
+	now               func() time.Time
+	feed              feedCache
+	workMu            sync.Mutex
+	monitorRaw        []byte
+	monitorTarget     string
+	monitorDay        string
+	lastHistoryAt     time.Time
+	lastHistoryReadAt time.Time
 	// onPollTicker is a test hook, called whenever the worker creates its poll ticker.
 	onPollTicker func(time.Duration)
 }
@@ -97,7 +103,7 @@ func (a *App) preview(ctx context.Context, s Settings) (Preview, error) {
 	if err != nil {
 		return Preview{}, err
 	}
-	return buildPreview(raw, a.now())
+	return buildPreview(raw, a.now(), a.settings.key)
 }
 
 func jsonResponse(w http.ResponseWriter, status int, body any) {
@@ -255,113 +261,24 @@ func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var event struct {
-		ID         string `json:"id"`
-		Event      string `json:"event"`
-		InstanceID string `json:"instance_id"`
-		Message    struct {
-			ID      string `json:"messageid"`
-			ChatID  string `json:"chatid"`
-			Text    string `json:"text"`
-			IsGroup bool   `json:"isGroup"`
-			FromMe  *bool  `json:"fromMe"`
-		} `json:"message"`
+		ID         string       `json:"id"`
+		Event      string       `json:"event"`
+		InstanceID string       `json:"instance_id"`
+		Message    groupMessage `json:"message"`
 	}
 	if json.Unmarshal(body, &event) != nil || !uuidPattern.MatchString(event.ID) || event.ID != r.Header.Get("X-Grapnel-Event-Id") {
 		jsonResponse(w, 400, map[string]string{"error": "invalid webhook event"})
 		return
 	}
-	match := event.Event == "whatsapp.group.message.received" && s.GrapnelInstanceID != "" && event.InstanceID == s.GrapnelInstanceID && s.GrapnelGroupJID != "" && event.Message.ChatID == s.GrapnelGroupJID && event.Message.IsGroup && event.Message.FromMe != nil && !*event.Message.FromMe && event.Message.ID != "" && strings.EqualFold(strings.TrimSpace(event.Message.Text), "#NBCC")
+	match := event.Event == "whatsapp.group.message.received" && s.GrapnelInstanceID != "" && event.InstanceID == s.GrapnelInstanceID && s.GrapnelGroupJID != "" && event.Message.ChatID == s.GrapnelGroupJID && event.Message.IsGroup && event.Message.FromMe != nil && event.Message.ID != "" && len(event.Message.ID) <= 255 && event.Message.Timestamp >= 0 && event.Message.Timestamp <= a.now().Add(time.Minute).UnixMilli() && strings.EqualFold(strings.TrimSpace(event.Message.Text), "#NBCC")
 	if match {
 		// Persist before acknowledgement. Disabled commands are suppressed, never replayed later.
-		if err = a.store.enqueue("event:"+event.ID, "", s.SendEnabled, a.now()); err != nil {
+		if err = a.command(event.Message, s); err != nil {
 			jsonResponse(w, 503, map[string]string{"error": "cannot persist webhook"})
 			return
 		}
 	}
 	jsonResponse(w, 202, map[string]any{"received": true, "command_matched": match, "send_enabled": s.SendEnabled})
-}
-
-// check fetches the feed, updates the baseline and queues a notification when the feed changed and sending is enabled.
-func (a *App) check(ctx context.Context) (bool, bool, error) {
-	s := a.settings.current()
-	p, err := a.preview(ctx, s)
-	code := ""
-	if err != nil {
-		code = "feed_unavailable"
-	}
-	a.status.recordCheck(a.now(), code)
-	if err != nil {
-		return false, false, err
-	}
-	return a.store.observe(p, s.SendEnabled, a.now())
-}
-
-func (a *App) processPending(ctx context.Context) error {
-	s := a.settings.current()
-	if !s.SendEnabled {
-		return nil
-	}
-	for _, job := range a.store.pending(a.now()) {
-		if a.now().Sub(job.CreatedAt) > 23*time.Hour {
-			job.Status = "failed"
-			job.Text = ""
-			if err := a.store.update(job, a.now()); err != nil {
-				return err
-			}
-			continue
-		}
-		var err error
-		failureCode := "grapnel_unavailable"
-		if job.Text == "" {
-			var p Preview
-			p, err = a.preview(ctx, s)
-			if err != nil {
-				failureCode = "feed_unavailable"
-			} else {
-				job.Text = p.Text
-				if err = a.store.update(job, a.now()); err != nil {
-					return err
-				}
-			}
-		}
-		if err == nil {
-			parts := messageParts(job.Text)
-			for job.NextPart < len(parts) {
-				err = a.sendText(ctx, s, parts[job.NextPart], job.ID+":p"+strconv.Itoa(job.NextPart))
-				if err != nil {
-					break
-				}
-				job.NextPart++
-				if err = a.store.update(job, a.now()); err != nil {
-					return err
-				}
-			}
-		}
-		job.Attempts++
-		if err == nil {
-			a.status.recordSend("")
-			job.Status = "accepted"
-			job.Text = ""
-		} else {
-			var apiErr *apiError
-			permanent := errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != 408 && apiErr.Status != 409 && apiErr.Status != 429
-			a.status.recordSend(failureCode)
-			if job.Attempts >= 8 || permanent {
-				job.Status = "failed"
-				job.Text = ""
-			} else {
-				job.NextAttempt = a.now().Add(time.Minute * time.Duration(1<<min(job.Attempts, 5)))
-				if apiErr != nil && apiErr.RetryAfter > 0 {
-					job.NextAttempt = a.now().Add(time.Duration(min(apiErr.RetryAfter, 3600)) * time.Second)
-				}
-			}
-			log.Printf("job %s: %v", job.ID, err)
-		}
-		if err = a.store.update(job, a.now()); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // runWorker polls the feed and drains the job queue. The poll ticker is recreated when pollIntervalMinutes changes.
@@ -390,6 +307,7 @@ func (a *App) runWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-a.settings.changedCh():
+			check()
 			if next := a.settings.current().pollInterval(); next != interval {
 				poll.Stop()
 				interval = next
@@ -399,6 +317,12 @@ func (a *App) runWorker(ctx context.Context) {
 		case <-poll.C:
 			check()
 		case <-jobs.C:
+			if err := a.schedule(ctx); err != nil {
+				log.Printf("schedule: %v", err)
+			}
+			if err := a.pollCommands(ctx); err != nil {
+				log.Printf("group history: %v", err)
+			}
 			if err := a.processPending(ctx); err != nil {
 				log.Printf("queue: %v", err)
 			}

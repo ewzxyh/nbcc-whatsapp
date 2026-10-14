@@ -96,7 +96,6 @@ func TestWebhookAuthenticationAndScope(t *testing.T) {
 		{"signature", commandBody(testGroup, false), h.clock.now(), true, 401},
 		{"replay", commandBody(testGroup, false), h.clock.now().Add(-6 * time.Minute), false, 401},
 		{"other group", commandBody("123456789@g.us", false), h.clock.now(), false, 202},
-		{"own message", commandBody(testGroup, true), h.clock.now(), false, 202},
 		{"missing direction", strings.Replace(commandBody(testGroup, false), `"fromMe":false,`, "", 1), h.clock.now(), false, 202},
 		{"other text", strings.Replace(commandBody(testGroup, false), "#NBCC", "hello", 1), h.clock.now(), false, 202},
 	} {
@@ -139,20 +138,20 @@ func TestWebhookWithoutConfiguredSecretFailsClosed(t *testing.T) {
 func TestMonitorBaselineChangeAndDisabledGuard(t *testing.T) {
 	h := newHarness(t)
 	h.settingsPatch(map[string]any{"sendEnabled": true})
-	p, err := buildPreview([]byte(testICS(testEvent("due", "Lab07 - Due", ";VALUE=DATE:20261014", ""))), h.clock.now())
+	p, err := testPreview([]byte(testICS(testEvent("due", "Lab07 - Due", ";VALUE=DATE:20261014", ""))), h.clock.now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed, queued, err := h.app.store.observe(p, true, h.clock.now())
-	if err != nil || changed || queued {
-		t.Fatal("first fetch must only establish baseline")
+	changed, queued, err := h.app.store.observe(p, true, deliveryTarget(h.app.settings.current(), h.app.settings.key), h.clock.now())
+	if err != nil || changed || !queued {
+		t.Fatal("activation must queue the initial agenda")
 	}
-	changed, queued, err = h.app.store.observe(p, true, h.clock.now())
+	changed, queued, err = h.app.store.observe(p, true, deliveryTarget(h.app.settings.current(), h.app.settings.key), h.clock.now())
 	if err != nil || changed || queued {
 		t.Fatal("unchanged feed queued a send")
 	}
 	p.FeedHash = "changed"
-	changed, queued, err = h.app.store.observe(p, true, h.clock.now())
+	changed, queued, err = h.app.store.observe(p, true, deliveryTarget(h.app.settings.current(), h.app.settings.key), h.clock.now())
 	if err != nil || !changed || !queued {
 		t.Fatal("change was not queued")
 	}

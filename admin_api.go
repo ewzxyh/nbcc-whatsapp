@@ -273,6 +273,12 @@ func (a *App) putSettings(w http.ResponseWriter, r *http.Request, _ adminSession
 	if len(changed) > 0 {
 		a.audit.record(a.now(), "settings.updated", changed...)
 	}
+	if !a.settings.current().SendEnabled {
+		if err := a.store.pause(a.now()); err != nil {
+			serverError(w)
+			return
+		}
+	}
 	jsonResponse(w, 200, viewOf(a.settings.current()))
 }
 
