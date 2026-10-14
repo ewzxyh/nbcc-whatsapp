@@ -36,12 +36,12 @@ func TestCalendarWindowTodayAndDuplicatePhases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"*(TODAY) Oct 13*", "*17:00*", "Access closes at 23:59", "*Oct 27*", "Assignment27"} {
+	for _, want := range []string{"*(TODAY) Oct 13*", "Due at *17:00*", "*Oct 27*", "Assignment27"} {
 		if !strings.Contains(preview.Text, want) {
 			t.Errorf("missing %q in %s", want, preview.Text)
 		}
 	}
-	for _, bad := range []string{"Old", "Outside", "Therapy Dog", "Halifax"} {
+	for _, bad := range []string{"Old", "Outside", "Therapy Dog", "Halifax", "Access closes"} {
 		if strings.Contains(preview.Text, bad) {
 			t.Errorf("unexpected %q", bad)
 		}
@@ -80,7 +80,7 @@ func TestCalendarRecurrenceAndTimeZone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Count != 2 || strings.Contains(p.Text, "*Oct 20*") || !strings.Contains(p.Text, "*09:00*") {
+	if p.Count != 1 || strings.Contains(p.Text, "*Oct 20*") || strings.Contains(p.Text, "(TODAY)") || !strings.Contains(p.Text, "*09:00*") {
 		t.Fatal(p.Text)
 	}
 	dst := time.Date(2026, 10, 30, 0, 0, 0, 0, testNow().Location())
@@ -112,5 +112,53 @@ func TestSameTitleDifferentAssessmentIDsRemainSeparate(t *testing.T) {
 	}
 	if p.Count != 2 {
 		t.Fatal("different assessments with the same title were merged", p.Text)
+	}
+}
+
+func TestPreviewIncludesOnlyUnexpiredDue(t *testing.T) {
+	description := func(id string) string {
+		return "DESCRIPTION:https://elearning.nbcc.ca/d2l/?ou=999999&qi=" + id + "\r\n"
+	}
+	raw := testICS(
+		testEvent("past", "Expired - Due", ";TZID=America/Halifax:20261013T130000", description("100")),
+		testEvent("past-end", "Expired - Availability Ends", ";VALUE=DATE:20261015", description("100")),
+		testEvent("exact", "Exact deadline - Due", ";TZID=America/Halifax:20261013T140000", description("200")),
+		testEvent("access", "Access only - Available", ";VALUE=DATE:20261014", description("300")),
+		testEvent("access-end", "Access only - Availability Ends", ";VALUE=DATE:20261015", description("300")),
+		testEvent("future", "Upcoming - Due", ";TZID=America/Halifax:20261013T170000", description("400")),
+		testEvent("future-end", "Upcoming - Availability Ends", ";TZID=America/Halifax:20261015T230000", description("400")),
+		testEvent("date", "Date only - Due", ";VALUE=DATE:20261013", ""),
+	)
+	p, err := testPreview([]byte(raw), testNow())
+	if err != nil || p.Count != 2 || len(p.deadlines) != 2 {
+		t.Fatal("wrong future Due activities", p.Count, err, p.Text)
+	}
+	for _, bad := range []string{"Expired", "Exact deadline", "Access only", "Access closes", "23:00"} {
+		if strings.Contains(p.Text, bad) {
+			t.Fatalf("included %q: %s", bad, p.Text)
+		}
+	}
+	for _, want := range []string{"Due at *17:00*", "Due by *23:59*"} {
+		if !strings.Contains(p.Text, want) {
+			t.Fatalf("missing %q: %s", want, p.Text)
+		}
+	}
+	changed, err := testPreview([]byte(strings.Replace(raw, "20261015T230000", "20261015T220000", 1)), testNow())
+	if err != nil || p.FeedHash != changed.FeedHash {
+		t.Fatal("access closing time changed the Due agenda", err)
+	}
+}
+
+func TestDateOnlyDueExpiresAtEndOfLocalDate(t *testing.T) {
+	raw := []byte(testICS(testEvent("date", "Date only - Due", ";VALUE=DATE:20261013", "")))
+	at := time.Date(2026, 10, 13, 23, 59, 59, 0, halifax)
+	for _, tc := range []struct {
+		now  time.Time
+		want int
+	}{{at.Add(-time.Second), 1}, {at, 0}, {at.Add(time.Second), 0}} {
+		p, err := testPreview(raw, tc.now)
+		if err != nil || p.Count != tc.want {
+			t.Fatal(tc.now, p.Count, err)
+		}
 	}
 }

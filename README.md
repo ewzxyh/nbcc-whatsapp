@@ -8,8 +8,8 @@ A Go service that reads a private NBCC Brightspace calendar feed, formats an Eng
 
 - Checks the calendar every `pollIntervalMinutes` (default 5) for event changes.
 - While sending is off, establishes and updates a baseline. Enabling sending queues the current agenda.
-- Compares the activities actually displayed, ignoring regenerated timestamps, event order, campus events and changes outside the window. Activities entering or leaving the window at midnight are changes too.
-- Lists academic deadlines, availability starts, and availability ends from **today through today + 14 days, inclusive**, using `America/Halifax`.
+- Compares the activities actually displayed, ignoring regenerated timestamps, event order, campus events and changes outside the window. Activities entering or leaving the window at midnight, or reaching their Due deadline during the day, are changes too.
+- Lists only academic activities with a future **Due** deadline from **today through today + 14 days, inclusive**, using `America/Halifax`. A deadline that has already passed, including earlier today, is excluded even if access closes later. Availability dates are not used as delivery deadlines; activities without Due are excluded from WhatsApp messages. The public calendar still includes their availability phases.
 - Groups the agenda by date and prefixes today's date with **`(TODAY)`**.
 - Combines phases only when an assessment identifier is available. Otherwise keeps distinct event UIDs separate. General campus events are omitted; malformed campus events follow the same omission policy as the public agenda, and malformed course activities block sending.
 - Uses WhatsApp bold for courses, titles and dates. A near deadline adds, for example, `⚠️ *_14 hours left_*` before its title.
@@ -23,7 +23,7 @@ A Go service that reads a private NBCC Brightspace calendar feed, formats an Eng
 
 When sending is disabled, notifications are not queued, pending work is canceled and commands are suppressed. Suppressed commands and canceled message parts are not replayed after enabling. The setting and destination are checked before every message part; an HTTP request already in flight may still complete.
 
-New visible activity content supersedes older pending notifications, including retries and incomplete batches. Every outgoing agenda is revalidated against a fresh feed before sending. Retries of unchanged work keep exactly the same body and idempotency key for each part.
+New visible activity content supersedes older pending notifications, including retries and incomplete batches. Every outgoing agenda is revalidated against a fresh feed before sending. Its earliest Due deadline and the day boundary are checked before every part; once either passes, remaining parts are canceled and a new agenda is prepared without expired activities. Retries of unchanged work keep exactly the same body and idempotency key for each part. A request already in flight can still be accepted or delivered after a deadline.
 
 Changing the feed URL compares the new feed with the stored baseline, so a different calendar can trigger one notification at the next check when sending is enabled.
 

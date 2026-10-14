@@ -86,6 +86,9 @@ func (a *App) schedule(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if _, _, err = a.store.observe(p, true, target, a.now()); err != nil {
+		return err
+	}
 	return a.store.queueReminders(p, target, a.now())
 }
 
@@ -246,7 +249,7 @@ func (a *App) processPending(ctx context.Context) error {
 			failureCode = "grapnel_unavailable"
 			for job.NextPart < len(parts) {
 				current, currentRevision = a.settings.deliverySnapshot()
-				if !current.SendEnabled || revision != currentRevision || a.store.currentJob(job.ID).Status != "pending" || job.Kind != "" && p.From != midnight(a.now()).Format(dateLayout) {
+				if !current.SendEnabled || revision != currentRevision || a.store.currentJob(job.ID).Status != "pending" || job.Kind != "" && !a.now().Before(p.validUntil) {
 					job.Status, job.Text = "superseded", ""
 					break
 				}
