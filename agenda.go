@@ -59,7 +59,9 @@ type agendaItem struct {
 	StartAt     *string `json:"startAt"`
 	EndAt       *string `json:"endAt"`
 	EndDate     *string `json:"endDate"`
-	at          time.Time
+
+	at                                  time.Time
+	notificationID, notificationVersion string
 }
 
 type agendaResponse struct {
@@ -110,6 +112,7 @@ type agendaSlot struct {
 type activityPhase struct {
 	agendaSlot
 	title, course, courseTitle string
+	identity, version          string
 }
 
 func (s agendaSlot) fill(it *agendaItem) {
@@ -379,6 +382,12 @@ func (b *agendaBuilder) process(r rawEvent) error {
 	identity := activityIdentity(uid, description)
 	course, courseTitle, _ := strings.Cut(agendaURLPattern.ReplaceAllString(html.UnescapeString(location), " "), ":")
 	recurring := e.Props.Get(ical.PropRecurrenceRule) != nil
+	rule := ""
+	if recurring {
+		rule = e.Props.Get(ical.PropRecurrenceRule).Value
+	}
+	// Use the series definition so moving the window never looks like an activity edit.
+	version := textHash(strings.Join([]string{r.start.In(moncton).Format(time.RFC3339), string(e.Props.Get(ical.PropDateTimeStart).ValueType()), plainText(r.name), plainText(course), rule}, "\x00"))
 	label := phaseLabels[r.phase]
 	for _, s := range slots {
 		key := course + "\x00" + identity
@@ -389,7 +398,7 @@ func (b *agendaBuilder) process(r rawEvent) error {
 			b.activities[key] = map[string]activityPhase{}
 		}
 		if prev, ok := b.activities[key][label]; !ok || s.start.Before(prev.start) {
-			b.activities[key][label] = activityPhase{agendaSlot: s, title: plainText(r.name), course: plainText(course), courseTitle: plainText(courseTitle)}
+			b.activities[key][label] = activityPhase{agendaSlot: s, title: plainText(r.name), course: plainText(course), courseTitle: plainText(courseTitle), identity: identity, version: version}
 		}
 	}
 	return nil
@@ -419,6 +428,7 @@ func buildAgenda(raw []byte, from, until time.Time, instructors map[string]strin
 	for key, phases := range b.activities {
 		for label, p := range phases {
 			it := agendaItem{ID: agendaHash(idKey, "activity", key, label), Type: "activity", Phase: ptr(label), Title: p.title, Course: nullable(p.course), CourseTitle: nullable(p.courseTitle), Instructor: nullable(plainText(instructors[p.course])), ActivityID: ptr(agendaHash(idKey, "activity", key))}
+			it.notificationID, it.notificationVersion = agendaHash(idKey, "notification-activity", p.identity), p.version
 			p.fill(&it)
 			b.items = append(b.items, it)
 		}

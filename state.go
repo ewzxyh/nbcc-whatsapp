@@ -29,15 +29,20 @@ type Job struct {
 }
 
 type diskState struct {
-	FeedHash        string               `json:"feed_hash"`
-	Jobs            map[string]Job       `json:"jobs"`
-	Enabled         bool                 `json:"enabled,omitempty"`
-	Target          string               `json:"target,omitempty"`
-	LastSentHash    string               `json:"last_sent_hash,omitempty"`
-	LastMessageHash string               `json:"last_message_hash,omitempty"`
-	CommandAfter    time.Time            `json:"command_after,omitempty"`
-	CommandsSince   time.Time            `json:"commands_since,omitempty"`
-	Reminders       map[string]time.Time `json:"reminders,omitempty"`
+	FeedHash              string               `json:"feed_hash"`
+	Jobs                  map[string]Job       `json:"jobs"`
+	Enabled               bool                 `json:"enabled,omitempty"`
+	Target                string               `json:"target,omitempty"`
+	LastSentHash          string               `json:"last_sent_hash,omitempty"`
+	LastMessageHash       string               `json:"last_message_hash,omitempty"`
+	LastActivityVersions  map[string]string    `json:"last_activity_versions"`
+	CampusHash            string               `json:"campus_hash,omitempty"`
+	LastCampusHash        string               `json:"last_campus_hash,omitempty"`
+	LastCampusMessageHash string               `json:"last_campus_message_hash,omitempty"`
+	LastCampusDate        string               `json:"last_campus_date,omitempty"`
+	CommandAfter          time.Time            `json:"command_after,omitempty"`
+	CommandsSince         time.Time            `json:"commands_since,omitempty"`
+	Reminders             map[string]time.Time `json:"reminders,omitempty"`
 }
 
 type Store struct {
@@ -129,15 +134,27 @@ func (s *Store) enqueue(id, text string, enabled bool, now time.Time) error {
 func (s *Store) observe(p Preview, enabled bool, target string, now time.Time) (changed, queued bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Upgrade an already delivered version without generating a migration broadcast.
+	seed := s.data.LastActivityVersions == nil && s.data.Target == target && s.data.LastSentHash != "" && s.data.LastSentHash == p.FeedHash
 	if p.FeedHash == s.data.FeedHash && enabled == s.data.Enabled && target == s.data.Target {
+		if seed {
+			next := s.copyState(now)
+			next.LastActivityVersions = p.activityVersions
+			return false, false, s.save(next)
+		}
 		return false, false, nil
 	}
 	changed = s.data.FeedHash != ""
 	changed = changed && p.FeedHash != s.data.FeedHash
 	activated := enabled && (!s.data.Enabled || target != s.data.Target)
 	next := s.copyState(now)
+	if seed {
+		next.LastActivityVersions = p.activityVersions
+	}
 	if target != next.Target {
 		next.LastSentHash, next.LastMessageHash = "", ""
+		next.LastActivityVersions = nil
+		next.CampusHash, next.LastCampusHash, next.LastCampusMessageHash, next.LastCampusDate = "", "", "", ""
 		next.CommandAfter = time.Time{}
 		next.Reminders = map[string]time.Time{}
 	}
@@ -145,7 +162,7 @@ func (s *Store) observe(p Preview, enabled bool, target string, now time.Time) (
 		next.CommandsSince = now
 	}
 	for id, job := range next.Jobs {
-		if job.Status == "pending" && (!enabled || job.Kind != "" && (job.Target != target || job.FeedHash != "" && job.FeedHash != p.FeedHash)) {
+		if job.Status == "pending" && (!enabled || job.Kind != "" && (job.Target != target || job.Kind != "campus" && job.FeedHash != "" && job.FeedHash != p.FeedHash)) {
 			job.Status, job.Text = "superseded", ""
 			next.Jobs[id] = job
 		}
@@ -166,7 +183,7 @@ func (s *Store) observe(p Preview, enabled bool, target string, now time.Time) (
 
 func hasPendingAgenda(d diskState) bool {
 	for _, j := range d.Jobs {
-		if j.Status == "pending" && j.Kind != "" {
+		if j.Status == "pending" && j.Kind != "" && j.Kind != "campus" {
 			return true
 		}
 	}
@@ -186,7 +203,7 @@ func (s *Store) command(id string, enabled bool, target string, at, now time.Tim
 	status := "pending"
 	blocked := !enabled || target == next.Target && (at.Before(next.CommandAfter) || at.Before(next.CommandsSince))
 	for _, j := range next.Jobs {
-		if j.Status == "pending" && j.Kind != "" && j.Target == target {
+		if j.Status == "pending" && j.Kind != "" && j.Kind != "campus" && j.Target == target {
 			blocked = true
 		}
 	}
@@ -221,10 +238,50 @@ func (s *Store) pause(now time.Time) error {
 
 func (s *Store) currentJob(id string) Job { s.mu.Lock(); defer s.mu.Unlock(); return s.data.Jobs[id] }
 
-func (s *Store) recent(hash, target string) (bool, string) {
+func (s *Store) activityVersions(target string) map[string]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	versions := map[string]string{}
+	if s.data.Target == target {
+		for id, version := range s.data.LastActivityVersions {
+			versions[id] = version
+		}
+	}
+	return versions
+}
+
+func (s *Store) recent(hash, target string, campus bool) (bool, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if campus {
+		return s.data.Target == target && s.data.LastCampusHash == hash && s.data.LastCampusMessageHash != "", s.data.LastCampusMessageHash
+	}
 	return s.data.Target == target && s.data.LastSentHash == hash && s.data.LastMessageHash != "", s.data.LastMessageHash
+}
+
+func (s *Store) observeCampus(p Preview, target string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.data.Enabled || s.data.Target != target || now.In(halifax).Hour() < 8 || s.data.CampusHash == p.FeedHash {
+		return nil
+	}
+	next := s.copyState(now)
+	for id, job := range next.Jobs {
+		if job.Status == "pending" && job.Kind == "campus" {
+			job.Status, job.Text = "superseded", ""
+			next.Jobs[id] = job
+		}
+	}
+	next.CampusHash = p.FeedHash
+	// Empty days stay quiet; cancellation of today's previously sent list is an update.
+	if p.Count > 0 || next.LastCampusDate == p.From {
+		if len(next.Jobs) >= 10000 {
+			return errors.New("queue capacity exceeded")
+		}
+		id := "campus:" + randomID()
+		next.Jobs[id] = Job{ID: id, Kind: "campus", Target: target, FeedHash: p.FeedHash, ExpiresAt: p.validUntil, Status: "pending", CreatedAt: now, NextAttempt: now}
+	}
+	return s.save(next)
 }
 
 func (s *Store) commandSince() time.Time {
@@ -294,7 +351,7 @@ func (s *Store) queueReminders(p Preview, target string, now time.Time) error {
 		}
 	}
 	for id, j := range next.Jobs {
-		if j.Status == "pending" && j.Kind != "" && j.Attempts == 0 && j.NextPart == 0 {
+		if j.Status == "pending" && j.Kind != "" && j.Kind != "campus" && j.Attempts == 0 && j.NextPart == 0 {
 			j.Kind, j.ReminderKeys, j.ExpiresAt = "reminder", keys, expires
 			next.Jobs[id] = j
 			return s.save(next)
@@ -308,15 +365,18 @@ func (s *Store) queueReminders(p Preview, target string, now time.Time) error {
 	return s.save(next)
 }
 
-func (s *Store) complete(job Job, hash, target, lastPart string, now time.Time) error {
+func (s *Store) complete(job Job, p Preview, target, lastPart string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := s.copyState(now)
 	job.Status, job.Text = "accepted", ""
 	next.Jobs[job.ID] = job
-	if job.Kind != "" {
+	if job.Kind == "campus" {
+		next.LastCampusHash, next.LastCampusMessageHash, next.LastCampusDate = job.FeedHash, textHash(lastPart), p.From
+	} else if job.Kind != "" {
 		next.Target = target
-		next.LastSentHash, next.LastMessageHash = hash, textHash(lastPart)
+		next.LastSentHash, next.LastMessageHash = job.FeedHash, textHash(lastPart)
+		next.LastActivityVersions = p.activityVersions
 		// A command combined with a reminder keeps its original command ID.
 		if job.Kind == "command" || strings.HasPrefix(job.ID, "command:") {
 			next.CommandAfter = now.Add(15 * time.Minute)

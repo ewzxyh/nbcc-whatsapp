@@ -7,12 +7,47 @@ import (
 )
 
 func testPreview(raw []byte, now time.Time) (Preview, error) {
-	return buildPreview(raw, now, make([]byte, 32), "https://nbcc.example.test")
+	return buildPreview(raw, now, make([]byte, 32), "https://nbcc.example.test", nil)
 }
 
 func testNow() time.Time {
 	loc, _ := time.LoadLocation("America/Halifax")
 	return time.Date(2026, 10, 13, 14, 0, 0, 0, loc)
+}
+
+func TestActivityBadgesIgnoreCountdownAndRecurringWindow(t *testing.T) {
+	for _, raw := range []string{
+		testICS(testEvent("today", "Lab - Due", ";TZID=America/Halifax:20261013T235900", "")),
+		testICS(testEvent("series", "Weekly Lab - Due", ";TZID=America/Halifax:20261013T180000", "RRULE:FREQ=WEEKLY;COUNT=5\r\n")),
+	} {
+		baseline, err := testPreview([]byte(raw), testNow())
+		if err != nil {
+			t.Fatal(err)
+		}
+		utcCopy := strings.Replace(raw, ";TZID=America/Halifax:20261013T235900", ":20261014T025900Z", 1)
+		equivalent, err := buildPreview([]byte(utcCopy), testNow(), make([]byte, 32), "https://nbcc.example.test", baseline.activityVersions)
+		if err != nil || strings.Contains(equivalent.Text, "*UPDATED*") || equivalent.FeedHash != baseline.FeedHash {
+			t.Fatal("equivalent timezone representation was treated as an edit", err)
+		}
+		for _, elapsed := range []time.Duration{time.Minute, 24 * time.Hour} {
+			current, err := buildPreview([]byte(raw), testNow().Add(elapsed), make([]byte, 32), "https://nbcc.example.test", baseline.activityVersions)
+			if err != nil || strings.Contains(current.Text, "*UPDATED*") {
+				t.Fatal("clock or window change marked an activity as edited", err, current.Text)
+			}
+			if elapsed == time.Minute && current.FeedHash != baseline.FeedHash {
+				t.Fatal("countdown changed the semantic agenda hash")
+			}
+		}
+		changed := strings.Replace(raw, "Lab - Due", "Changed Lab - Due", 1)
+		plain, err := testPreview([]byte(changed), testNow())
+		if err != nil {
+			t.Fatal(err)
+		}
+		marked, err := buildPreview([]byte(changed), testNow(), make([]byte, 32), "https://nbcc.example.test", baseline.activityVersions)
+		if err != nil || marked.FeedHash != plain.FeedHash || !strings.Contains(marked.Text, "🔄 *UPDATED* 🔄") {
+			t.Fatal("badge changed the semantic hash or edit was not marked", err, marked.Text)
+		}
+	}
 }
 
 func testICS(events ...string) string {

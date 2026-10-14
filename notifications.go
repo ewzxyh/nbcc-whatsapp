@@ -46,7 +46,7 @@ func (a *App) checkLocked(ctx context.Context) (bool, bool, error) {
 	raw, err := a.fetchFeed(ctx, s.NBCCFeedURL)
 	var p Preview
 	if err == nil {
-		p, err = buildPreview(raw, a.now(), a.settings.key, s.PublicBaseURL)
+		p, err = buildPreview(raw, a.now(), a.settings.key, s.PublicBaseURL, a.store.activityVersions(deliveryTarget(s, a.settings.key)))
 	}
 	code := ""
 	if err != nil {
@@ -82,14 +82,17 @@ func (a *App) schedule(ctx context.Context) error {
 			return err
 		}
 	}
-	p, err := buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL)
+	p, err := buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL, a.store.activityVersions(target))
 	if err != nil {
 		return err
 	}
 	if _, _, err = a.store.observe(p, true, target, a.now()); err != nil {
 		return err
 	}
-	return a.store.queueReminders(p, target, a.now())
+	if err = a.store.queueReminders(p, target, a.now()); err != nil {
+		return err
+	}
+	return a.store.observeCampus(campusPreview(p, s.PublicBaseURL), target, a.now())
 }
 
 // The provider webhook excludes fromMe messages; history polling also covers commands from our number.
@@ -143,7 +146,7 @@ func (a *App) pollCommands(ctx context.Context) error {
 }
 
 func (a *App) recentAgenda(ctx context.Context, s Settings, p Preview) (bool, error) {
-	same, hash := a.store.recent(p.FeedHash, deliveryTarget(s, a.settings.key))
+	same, hash := a.store.recent(p.FeedHash, deliveryTarget(s, a.settings.key), p.isCampus)
 	if !same {
 		return false, nil
 	}
@@ -170,15 +173,18 @@ func (a *App) processPending(ctx context.Context) error {
 	if len(jobs) == 0 {
 		return nil
 	}
-	var p Preview
+	var agendaPreview Preview
 	var previewErr error
 	for _, j := range jobs {
 		if j.Kind != "" {
 			_, _, previewErr = a.checkLocked(ctx)
 			if previewErr == nil {
-				p, previewErr = buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL)
+				agendaPreview, previewErr = buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL, a.store.activityVersions(deliveryTarget(s, a.settings.key)))
 				if previewErr == nil {
-					previewErr = a.store.queueReminders(p, deliveryTarget(s, a.settings.key), a.now())
+					previewErr = a.store.queueReminders(agendaPreview, deliveryTarget(s, a.settings.key), a.now())
+				}
+				if previewErr == nil {
+					previewErr = a.store.observeCampus(campusPreview(agendaPreview, s.PublicBaseURL), deliveryTarget(s, a.settings.key), a.now())
 				}
 			}
 			break
@@ -189,6 +195,10 @@ func (a *App) processPending(ctx context.Context) error {
 	}
 	target := deliveryTarget(s, a.settings.key)
 	for _, job := range jobs {
+		p := agendaPreview
+		if job.Kind == "campus" {
+			p = campusPreview(agendaPreview, s.PublicBaseURL)
+		}
 		current, currentRevision := a.settings.deliverySnapshot()
 		if !current.SendEnabled || revision != currentRevision {
 			return a.store.pause(a.now())
@@ -236,7 +246,10 @@ func (a *App) processPending(ctx context.Context) error {
 			}
 		}
 		if err == nil && job.Kind != "" && job.Text == "" {
-			p, err = buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL)
+			p, err = buildPreview(a.monitorRaw, a.now(), a.settings.key, s.PublicBaseURL, a.store.activityVersions(target))
+			if err == nil && job.Kind == "campus" {
+				p = campusPreview(p, s.PublicBaseURL)
+			}
 			if err == nil {
 				job.Text, job.FeedHash = p.Text, p.FeedHash
 				err = a.store.update(job, a.now())
@@ -281,7 +294,7 @@ func (a *App) processPending(ctx context.Context) error {
 		job.Attempts++
 		if err == nil && len(parts) > 0 {
 			a.status.recordSend("")
-			if err = a.store.complete(job, job.FeedHash, target, parts[len(parts)-1], a.now()); err != nil {
+			if err = a.store.complete(job, p, target, parts[len(parts)-1], a.now()); err != nil {
 				return err
 			}
 			continue

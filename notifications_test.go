@@ -30,8 +30,208 @@ func TestNotificationUsesVisibleWindow(t *testing.T) {
 	h.clock.advance(24 * time.Hour)
 	h.app.check(ctx)
 	h.app.processPending(ctx)
-	if posts, _ := h.up.snapshot(); posts != before+1 {
-		t.Fatal("new activity entering the moving window was missed")
+	if posts, _ := h.up.snapshot(); posts != before+2 {
+		t.Fatal("new activity or today's separate campus message was missed", h.up.sent)
+	}
+}
+
+func TestChangedActivityIsMarkedAndUnchangedResendIsNot(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.up.feed = testICS(testEvent("one", "Lab One - Due", ";TZID=America/Halifax:20261015T090000", ""), testEvent("two", "Lab Two - Due", ";VALUE=DATE:20261016", ""))
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	h.up.feed = strings.Replace(h.up.feed, "T090000", "T110000", 1)
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 || !strings.Contains(h.up.sent[1], "🔄 *UPDATED* 🔄 *Lab One*") || strings.Contains(h.up.sent[1], "🔄 *UPDATED* 🔄 *Lab Two*") {
+		t.Fatal("change did not mark only the edited activity", h.up.sent)
+	}
+	h.app.command(groupMessage{ID: "unchanged-resend"}, h.app.settings.current())
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 3 || strings.Contains(h.up.sent[2], "*UPDATED*") {
+		t.Fatal("unchanged activity was marked again", h.up.sent)
+	}
+}
+
+func TestPreviewWithoutNotificationStore(t *testing.T) {
+	h := newHarness(t)
+	h.app.store = nil
+	p, err := h.app.preview(context.Background(), h.app.settings.current())
+	if err != nil || p.Count == 0 {
+		t.Fatal("read-only CLI preview must work before opening the notification store", err)
+	}
+}
+
+func TestActivityCourseChangeKeepsChangeIdentity(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.up.feed = testICS(testEvent("one", "Lab One - Due", ";VALUE=DATE:20261015", ""))
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	h.up.feed = strings.Replace(h.up.feed, "LOCATION:Linux I: Linux Fundamentals", "LOCATION:Microsoft I: Windows", 1)
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 || !strings.Contains(h.up.sent[1], "*Microsoft I* — 🔄 *UPDATED* 🔄 *Lab One*") {
+		t.Fatal("course change was not identified as an edit", h.up.sent)
+	}
+}
+
+func TestLegacyActivityBaselineSeedsWithoutSending(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.up.feed = testICS(testEvent("one", "Lab One - Due", ";VALUE=DATE:20261015", ""))
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	data, err := os.ReadFile(h.app.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy map[string]any
+	if err = json.Unmarshal(data, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	delete(legacy, "last_activity_versions")
+	data, _ = json.Marshal(legacy)
+	if err = os.WriteFile(h.app.store.path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	h.app.store, err = openStore(h.app.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 1 {
+		t.Fatal("baseline migration caused a send", posts)
+	}
+	h.up.feed = strings.Replace(h.up.feed, "Lab One - Due", "Renamed Lab - Due", 1)
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 || !strings.Contains(h.up.sent[1], "🔄 *UPDATED* 🔄 *Renamed Lab*") {
+		t.Fatal("migrated baseline did not detect the first edit", h.up.sent)
+	}
+}
+
+func TestCampusEventsAtEightAreSeparateAndOnlyForToday(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.clock.advance(-6*time.Hour - time.Second)
+	h.up.feed = testICS(
+		testEvent("lab", "Course Lab - Due", ";VALUE=DATE:20261016", ""),
+		testEvent("lunch", "Campus Lunch", ";TZID=America/Halifax:20261013T123000", "DTEND;TZID=America/Halifax:20261013T131500\r\n"),
+		testEvent("all-day", "Campus Fair", ";VALUE=DATE:20261013", ""),
+		testEvent("yesterday", "Yesterday Event", ";VALUE=DATE:20261012", ""),
+		testEvent("tomorrow", "Tomorrow Event", ";VALUE=DATE:20261014", ""),
+	)
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	h.app.schedule(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 1 {
+		t.Fatal("campus events were sent before 08:00", h.up.sent)
+	}
+	h.clock.advance(time.Second)
+	h.app.schedule(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 {
+		t.Fatal("campus message was not sent at 08:00", h.up.sent)
+	}
+	message := h.up.sent[1]
+	for _, want := range []string{"*NBCC — Campus Events Today*", "*(TODAY) Oct 13*", "*Campus Lunch*", "*12:30–13:15*", "*Campus Fair* — *All day*", "https://nbcc.example.test/", "Type *#NBCC* for the latest agenda."} {
+		if !strings.Contains(message, want) {
+			t.Fatal("campus message omitted", want, message)
+		}
+	}
+	for _, absent := range []string{"Yesterday Event", "Tomorrow Event", "Course Lab"} {
+		if strings.Contains(message, absent) {
+			t.Fatal("campus message included another day or an activity", message)
+		}
+	}
+	var err error
+	h.app.store, err = openStore(h.app.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.app.schedule(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 {
+		t.Fatal("campus message repeated after restart", h.up.sent)
+	}
+	// The campus post must not replace the last accepted course agenda in deduplication.
+	h.up.messages = []groupMessage{
+		{ID: "campus", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: message},
+		{ID: "agenda", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: h.up.sent[0]},
+	}
+	h.app.command(groupMessage{ID: "still-visible"}, h.app.settings.current())
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 {
+		t.Fatal("campus message broke the recent-five agenda rule", h.up.sent)
+	}
+	h.up.feed = strings.Replace(h.up.feed, "Campus Lunch", "Updated Campus Lunch", 1)
+	h.app.check(ctx)
+	h.app.schedule(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 3 || !strings.Contains(h.up.sent[2], "*Updated Campus Lunch*") || strings.Contains(h.up.sent[2], "Course Lab") {
+		t.Fatal("today's campus edit did not send only the campus list", h.up.sent)
+	}
+	h.up.feed = strings.ReplaceAll(h.up.feed, "20261013", "20261014")
+	h.app.check(ctx)
+	h.app.schedule(ctx)
+	h.app.processPending(ctx)
+	h.app.schedule(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 4 || !strings.Contains(h.up.sent[3], "No campus events scheduled for today.") {
+		t.Fatal("canceled campus events were not corrected once", h.up.sent)
+	}
+}
+
+func TestCampusRetryExpiresAtMidnightAndEmptyDaysStayQuiet(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.clock.advance(-6*time.Hour - time.Second)
+	h.up.feed = testICS(testEvent("lab", "Lab - Due", ";VALUE=DATE:20261016", ""), testEvent("campus", "Campus Today", ";VALUE=DATE:20261013", ""))
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	h.clock.advance(time.Second)
+	h.app.schedule(ctx)
+	h.up.hook = func(r *http.Request) (*http.Response, bool) {
+		if r.Method == "POST" {
+			return testResponse(503, `{}`), true
+		}
+		return nil, false
+	}
+	h.app.processPending(ctx)
+	h.clock.advance(24 * time.Hour)
+	h.up.hook = nil
+	h.app.schedule(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 1 {
+		t.Fatal("yesterday's failed campus message or an empty day was broadcast", h.up.sent)
+	}
+}
+
+func TestCampusJobsDoNotConsumeDeadlineReminders(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.up.feed = testICS(testEvent("lab", "Lab - Due", ";TZID=America/Halifax:20261014T050000", ""), testEvent("campus", "Campus Today", ";VALUE=DATE:20261013", ""))
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	h.app.schedule(ctx)
+	h.clock.advance(time.Hour)
+	h.app.schedule(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 3 {
+		t.Fatal("a campus job swallowed the deadline reminder", h.up.sent)
+	}
+	if strings.Contains(h.up.sent[1], "Lab") || !strings.Contains(h.up.sent[1], "*Campus Today*") || !strings.Contains(h.up.sent[2], "*_14 hours left_*") {
+		t.Fatal("campus events and reminders were mixed", h.up.sent)
 	}
 }
 

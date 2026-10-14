@@ -30,8 +30,12 @@ type Preview struct {
 	FeedHash      string    `json:"feed_hash"`
 	FetchedAt     time.Time `json:"fetched_at"`
 	OmittedEvents int       `json:"omitted_events"`
-	deadlines     []deadline
-	validUntil    time.Time
+
+	deadlines        []deadline
+	validUntil       time.Time
+	activityVersions map[string]string
+	events           []agendaItem
+	isCampus         bool
 }
 
 func midnight(t time.Time) time.Time {
@@ -86,7 +90,7 @@ type deadline struct {
 	At time.Time
 }
 
-func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string) (Preview, error) {
+func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string, previous map[string]string) (Preview, error) {
 	start := midnight(now)
 	end := start.AddDate(0, 0, 15)
 	p := Preview{From: start.Format(dateLayout), Through: end.AddDate(0, 0, -1).Format(dateLayout), FetchedAt: now, validUntil: start.AddDate(0, 0, 1)}
@@ -95,12 +99,16 @@ func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string)
 		return p, err
 	}
 	p.OmittedEvents = len(omitted)
+	p.activityVersions = map[string]string{}
 	type row struct {
 		at             time.Time
 		text, identity string
 	}
 	rows := []row{}
 	for _, it := range items {
+		if it.Type == "event" && it.Date == p.From {
+			p.events = append(p.events, it)
+		}
 		if it.Type != "activity" || *it.Phase != "due" {
 			continue
 		}
@@ -128,6 +136,8 @@ func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string)
 		text := "• " + course + title + ": Due" + when + "."
 		// Compare visible content, excluding the moving heading and countdown labels.
 		identity := it.at.Format(time.RFC3339) + "\x00" + text
+		p.activityVersions[it.notificationID] = it.notificationVersion
+		prefix := course
 		if left := at.Sub(now); left <= 14*time.Hour || midnight(it.at).Equal(start) {
 			minutes := int((left + time.Minute - 1) / time.Minute)
 			warning := fmt.Sprintf("%d hours left", (minutes+59)/60)
@@ -136,8 +146,12 @@ func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string)
 			} else if minutes == 60 {
 				warning = "1 hour left"
 			}
-			text = "• " + course + "⚠️ *_" + warning + "_* " + title + ": Due" + when + "."
+			prefix += "⚠️ *_" + warning + "_* "
 		}
+		if old, ok := previous[it.notificationID]; ok && old != it.notificationVersion {
+			prefix += "🔄 *UPDATED* 🔄 "
+		}
+		text = "• " + prefix + title + ": Due" + when + "."
 		rows = append(rows, row{it.at.In(halifax), text, identity})
 	}
 	sort.Slice(rows, func(i, j int) bool {
@@ -199,4 +213,39 @@ func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string)
 	p.FeedHash = hex.EncodeToString(hash[:])
 	p.Count = len(rows)
 	return p, nil
+}
+
+func campusPreview(agenda Preview, publicBaseURL string) Preview {
+	start := midnight(agenda.FetchedAt)
+	p := Preview{From: agenda.From, Through: agenda.From, FetchedAt: agenda.FetchedAt, Count: len(agenda.events), validUntil: start.AddDate(0, 0, 1), isCampus: true}
+	var b strings.Builder
+	fmt.Fprintf(&b, "🏫 *NBCC — Campus Events Today*\n\n*(TODAY) %s*\n", start.Format("Jan 2"))
+	for _, event := range agenda.events {
+		when := "All day"
+		if !event.AllDay {
+			when = event.at.In(halifax).Format("15:04")
+			if event.EndAt != nil {
+				end, _ := time.Parse(time.RFC3339, *event.EndAt)
+				layout := "15:04"
+				if !midnight(event.at).Equal(midnight(end)) {
+					layout = "Jan 2, 15:04"
+				}
+				when += "–" + end.In(halifax).Format(layout)
+			}
+		}
+		fmt.Fprintf(&b, "• *%s* — *%s*", event.Title, when)
+		if event.Location != nil {
+			fmt.Fprintf(&b, " — %s", *event.Location)
+		}
+		b.WriteByte('\n')
+	}
+	if p.Count == 0 {
+		b.WriteString("• No campus events scheduled for today.\n")
+	}
+	p.Text = strings.TrimSpace(b.String())
+	if publicBaseURL != "" {
+		p.Text += agendaLinkLabel + strings.TrimRight(publicBaseURL, "/") + "/\nType *#NBCC* for the latest agenda."
+	}
+	p.FeedHash = textHash(p.From + "\n" + p.Text)
+	return p
 }

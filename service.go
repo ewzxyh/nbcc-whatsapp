@@ -103,7 +103,11 @@ func (a *App) preview(ctx context.Context, s Settings) (Preview, error) {
 	if err != nil {
 		return Preview{}, err
 	}
-	return buildPreview(raw, a.now(), a.settings.key, s.PublicBaseURL)
+	var previous map[string]string
+	if a.store != nil {
+		previous = a.store.activityVersions(deliveryTarget(s, a.settings.key))
+	}
+	return buildPreview(raw, a.now(), a.settings.key, s.PublicBaseURL, previous)
 }
 
 func jsonResponse(w http.ResponseWriter, status int, body any) {
