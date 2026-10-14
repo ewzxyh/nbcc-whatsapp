@@ -75,6 +75,54 @@ func TestCommandCooldownAndRecentConversation(t *testing.T) {
 	}
 }
 
+func TestAutomaticMessagesDoNotStartCommandCooldown(t *testing.T) {
+	for _, kind := range []string{"agenda", "reminder"} {
+		t.Run(kind, func(t *testing.T) {
+			h := newHarness(t)
+			ctx := context.Background()
+			h.up.feed = testICS(testEvent("due", "Lab - Due", ";TZID=America/Halifax:20261014T050000", ""))
+			h.settingsPatch(map[string]any{"sendEnabled": true})
+			h.app.check(ctx)
+			h.app.processPending(ctx)
+			want := 2
+			if kind == "reminder" {
+				h.clock.advance(time.Hour)
+				h.app.schedule(ctx)
+				h.app.processPending(ctx)
+				want++
+			}
+			// An empty conversation history means the automatic agenda has left the latest five.
+			h.app.command(groupMessage{ID: "after-automatic"}, h.app.settings.current())
+			h.app.processPending(ctx)
+			if posts, _ := h.up.snapshot(); posts != want {
+				t.Fatal("automatic message blocked an eligible command", posts)
+			}
+		})
+	}
+}
+
+func TestAutomaticMessageDoesNotExtendCommandCooldown(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.up.feed = testICS(testEvent("due", "Lab - Due", ";VALUE=DATE:20261016", ""))
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.command(groupMessage{ID: "first-response"}, h.app.settings.current())
+	h.app.processPending(ctx)
+	h.clock.advance(5 * time.Minute)
+	h.up.feed = strings.Replace(h.up.feed, "Lab - Due", "Updated Lab - Due", 1)
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 {
+		t.Fatal("automatic update was not sent", posts)
+	}
+	h.clock.advance(10 * time.Minute)
+	h.app.command(groupMessage{ID: "exactly-after-15-minutes"}, h.app.settings.current())
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 3 {
+		t.Fatal("automatic update prolonged the command cooldown", posts)
+	}
+}
+
 func TestCommandCountdownIsUpdatedAfterHistoryLookup(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -491,13 +539,21 @@ func TestDelayedCommandInsideCooldownIsNeverReplayed(t *testing.T) {
 	h.webhook(commandBody(testGroup, false), h.clock.now())
 	h.app.processPending(ctx)
 	inside := h.clock.now().Add(5 * time.Minute)
-	h.clock.advance(16 * time.Minute)
+	h.clock.advance(5 * time.Minute)
+	h.app.command(groupMessage{ID: "during-cooldown", Timestamp: inside.UnixMilli()}, h.app.settings.current())
+	h.app.processPending(ctx)
+	h.clock.advance(11 * time.Minute)
 	if err := h.app.command(groupMessage{ID: "delayed", Timestamp: inside.UnixMilli()}, h.app.settings.current()); err != nil {
 		t.Fatal(err)
 	}
 	h.app.processPending(ctx)
 	if posts, _ := h.up.snapshot(); posts != 1 {
 		t.Fatal("ignored command was replayed after cooldown")
+	}
+	h.app.command(groupMessage{ID: "after-cooldown", Timestamp: h.clock.now().UnixMilli()}, h.app.settings.current())
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 {
+		t.Fatal("a fresh command after cooldown was not processed", posts)
 	}
 }
 

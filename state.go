@@ -317,7 +317,10 @@ func (s *Store) complete(job Job, hash, target, lastPart string, now time.Time) 
 	if job.Kind != "" {
 		next.Target = target
 		next.LastSentHash, next.LastMessageHash = hash, textHash(lastPart)
-		next.CommandAfter = now.Add(15 * time.Minute)
+		// A command combined with a reminder keeps its original command ID.
+		if job.Kind == "command" || strings.HasPrefix(job.ID, "command:") {
+			next.CommandAfter = now.Add(15 * time.Minute)
+		}
 		for _, key := range job.ReminderKeys {
 			next.Reminders[key] = job.ExpiresAt
 		}

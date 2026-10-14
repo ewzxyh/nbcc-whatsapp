@@ -3,8 +3,7 @@ import { ArrowRightUpIcon, BookIcon, ClipboardListIcon, DocumentTextIcon, HomeIc
 import { Button } from '@/components/ui/button'
 import { QUICK_LINK_COURSES, type QuickLinkCourse } from '@/lib/quickLinks'
 
-// The banner comes from NBCC eLearning, which may refuse it to visitors who are not signed in.
-// A neutral block takes its place, so every card keeps the same shape.
+// Banners are bundled locally; the fallback keeps card dimensions if an image cannot load.
 function CourseImage({ src }: { src: string }) {
   const [failed, setFailed] = useState(false)
   if (failed) {

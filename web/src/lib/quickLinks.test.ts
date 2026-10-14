@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { QUICK_LINK_COURSES } from './quickLinks'
 
@@ -11,7 +13,7 @@ describe('quick links', () => {
 
   it('points every link at the NBCC eLearning host and the same course', () => {
     for (const course of QUICK_LINK_COURSES) {
-      const urls = [course.imageUrl, course.homeUrl, course.quizUrl, course.assignmentsUrl].filter(
+      const urls = [course.homeUrl, course.quizUrl, course.assignmentsUrl].filter(
         (url): url is string => url !== null,
       )
       for (const url of urls) {
@@ -19,9 +21,16 @@ describe('quick links', () => {
         expect(url).toContain(course.id)
       }
       expect(course.homeUrl).toBe(`https://elearning.nbcc.ca/d2l/home/${course.id}`)
-      expect(course.imageUrl).toContain(`/d2l/api/lp/1.47/courses/${course.id}/image`)
       if (course.quizUrl) expect(course.quizUrl).toContain(`ou=${course.id}`)
       if (course.assignmentsUrl) expect(course.assignmentsUrl).toContain(`ou=${course.id}&isprv=0`)
+    }
+  })
+
+  it('serves a bundled JPEG for every course without requiring a Brightspace session', () => {
+    for (const course of QUICK_LINK_COURSES) {
+      expect(course.imageUrl).toMatch(/^\/course-images\/\d+\.jpg$/)
+      const image = readFileSync(fileURLToPath(new URL(`../../public${course.imageUrl}`, import.meta.url)))
+      expect([...image.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff])
     }
   })
 
