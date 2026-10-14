@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { CircleAlert } from 'lucide-react'
+import { DangerCircleIcon } from '@solar-icons/react/linear'
 
 export interface ErrorSummaryItem {
   // Input id for a field error. Omit for a form-level message.
@@ -38,7 +38,7 @@ export function ErrorSummary({ title = 'Revise os campos destacados', items }: E
       className="space-y-2 rounded-2xl border border-destructive/40 bg-destructive-subtle px-4 py-3 text-base text-foreground"
     >
       <p className="flex items-center gap-2 font-semibold">
-        <CircleAlert aria-hidden="true" className="size-5 shrink-0 text-destructive" />
+        <DangerCircleIcon aria-hidden="true" className="size-5 shrink-0 text-destructive" />
         {title}
       </p>
       <ul className="list-disc space-y-1 pl-6">

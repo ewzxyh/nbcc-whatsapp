@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Check } from 'lucide-react'
+import { CheckIcon } from '@solar-icons/react/linear'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 const CHIP_CLASS =
@@ -8,7 +8,7 @@ const CHIP_CLASS =
 export function ToggleChip({ value, children }: { value: string; children: ReactNode }) {
   return (
     <ToggleGroupItem value={value} className={CHIP_CLASS}>
-      <Check aria-hidden="true" className="hidden size-4 group-data-[state=on]/chip:block" />
+      <CheckIcon aria-hidden="true" className="hidden size-4.5 group-data-[state=on]/chip:block" />
       <span>{children}</span>
     </ToggleGroupItem>
   )

@@ -1,4 +1,4 @@
-import { Clock, Lock, LockOpen, Timer } from 'lucide-react'
+import { ClockCircleIcon, HourglassIcon, LockKeyholeIcon, LockKeyholeUnlockedIcon } from '@solar-icons/react/linear'
 import { Badge } from '@/components/ui/badge'
 import { countdownFor, itemInstant, litSegments, PROGRESS_SEGMENTS, timeLeftShare } from '@/lib/deadlines'
 import type { AgendaItem } from '@/lib/api'
@@ -14,7 +14,7 @@ export function PhaseTimer({ item }: { item: AgendaItem }) {
       variant="outline"
       className={cn('gap-1.5 border-input bg-background tabular-nums', passed ? 'text-muted-foreground' : 'text-foreground')}
     >
-      <Timer aria-hidden="true" className="size-3.5" />
+      <HourglassIcon aria-hidden="true" className="size-4" />
       <span>{text}</span>
     </Badge>
   )
@@ -65,7 +65,7 @@ export function TimeLeftMeter({ item, openedAt }: { item: AgendaItem; openedAt: 
 }
 
 export function PhaseIcon({ phase }: { phase: AgendaItem['phase'] }) {
-  if (phase === 'available') return <LockOpen aria-hidden="true" className="size-4 shrink-0" />
-  if (phase === 'closes') return <Lock aria-hidden="true" className="size-4 shrink-0" />
-  return <Clock aria-hidden="true" className="size-4 shrink-0" />
+  if (phase === 'available') return <LockKeyholeUnlockedIcon aria-hidden="true" className="size-4.5 shrink-0" />
+  if (phase === 'closes') return <LockKeyholeIcon aria-hidden="true" className="size-4.5 shrink-0" />
+  return <ClockCircleIcon aria-hidden="true" className="size-4.5 shrink-0" />
 }

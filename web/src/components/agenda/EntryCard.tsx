@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { MapPin, Clock } from 'lucide-react'
+import { ClockCircleIcon, MapPointIcon } from '@solar-icons/react/linear'
 import { Badge } from '@/components/ui/badge'
 import { CopyButton } from '@/components/agenda/CopyButton'
 import { PhaseIcon, PhaseTimer, TimeLeftMeter } from '@/components/agenda/DeadlineMeter'
@@ -68,13 +68,13 @@ function EntryCardBase({ entry, showDate = false, onSelect }: EntryCardProps) {
             ) : (
               <>
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1.5 tabular-nums">
-                  <Clock aria-hidden="true" className="size-4 shrink-0" />
+                  <ClockCircleIcon aria-hidden="true" className="size-4.5 shrink-0" />
                   <span>{formatEventTime(entry.item)}</span>
                   <PhaseTimer item={entry.item} />
                 </span>
                 {entry.item.location && (
                   <span className="flex items-start gap-2">
-                    <MapPin aria-hidden="true" className="mt-1 size-4 shrink-0" />
+                    <MapPointIcon aria-hidden="true" className="mt-1 size-4.5 shrink-0" />
                     <span className="break-words">{entry.item.location}</span>
                   </span>
                 )}

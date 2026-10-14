@@ -197,6 +197,10 @@ For a local run, set `STATE_PATH` to a scratch directory (the default `data/stat
 
 Tests cover date boundaries, `(TODAY)`, recurrence, daylight saving time, stable feed comparisons, webhook signatures and secret rotation, group isolation, disabled sending, restart deduplication, partial-message retries, setup and sign-in, concurrent lockout and IPv6 prefixes, fixed administrator identity, session lifetimes, CSRF and origin checks, password changes, settings validation, encryption at rest, keyed public IDs, the legacy seed, omitted series and override order, static routing, calendar contrast and secret-field accessibility. Test identifiers and secrets are synthetic.
 
+## Credits
+
+Icons are from [Solar Icon Set](https://github.com/480-Design/Solar-Icon-Set) by 480 Design, licensed under CC BY 4.0, through `@solar-icons/react` (MIT).
+
 ## Private data
 
 `.env`, runtime data (`data/`, including `secret.key`), production verification reports, calendar exports, and `private/` are excluded from Git and Docker build contexts. Never commit private feed URLs, API keys, signing secrets, live group IDs, server details, or personal calendar snapshots. The application does not need NBCC browser cookies.

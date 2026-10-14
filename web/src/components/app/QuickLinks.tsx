@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BookOpen, ClipboardList, ExternalLink, FileText, House, type LucideIcon } from 'lucide-react'
+import { ArrowRightUpIcon, BookIcon, ClipboardListIcon, DocumentTextIcon, HomeIcon } from '@solar-icons/react/linear'
 import { Button } from '@/components/ui/button'
 import { QUICK_LINK_COURSES, type QuickLinkCourse } from '@/lib/quickLinks'
 
@@ -10,7 +10,7 @@ function CourseImage({ src }: { src: string }) {
   if (failed) {
     return (
       <div aria-hidden="true" className="flex aspect-video w-full items-center justify-center bg-surface text-muted-foreground">
-        <BookOpen className="size-10" />
+        <BookIcon className="size-10" />
       </div>
     )
   }
@@ -28,13 +28,13 @@ function CourseImage({ src }: { src: string }) {
   )
 }
 
-function ShortcutLink({ href, label, course, icon: Icon }: { href: string; label: string; course: string; icon: LucideIcon }) {
+function ShortcutLink({ href, label, course, icon: Icon }: { href: string; label: string; course: string; icon: typeof HomeIcon }) {
   return (
     <Button asChild variant="outline" className="w-full justify-start">
       <a href={href} target="_blank" rel="noopener noreferrer" aria-label={`${label}, ${course} (opens in a new tab)`}>
         <Icon aria-hidden="true" />
         <span className="min-w-0 flex-1 text-left">{label}</span>
-        <ExternalLink aria-hidden="true" className="size-4" />
+        <ArrowRightUpIcon aria-hidden="true" className="size-4.5" />
       </a>
     </Button>
   )
@@ -51,12 +51,12 @@ function CourseCard({ course }: { course: QuickLinkCourse }) {
             {course.name}
           </h3>
           <div className="mt-auto flex flex-col gap-2">
-            <ShortcutLink href={course.homeUrl} label="Course home" course={course.name} icon={House} />
+            <ShortcutLink href={course.homeUrl} label="Course home" course={course.name} icon={HomeIcon} />
             {course.quizUrl && (
-              <ShortcutLink href={course.quizUrl} label="Quiz" course={course.name} icon={ClipboardList} />
+              <ShortcutLink href={course.quizUrl} label="Quiz" course={course.name} icon={ClipboardListIcon} />
             )}
             {course.assignmentsUrl && (
-              <ShortcutLink href={course.assignmentsUrl} label="Assignments" course={course.name} icon={FileText} />
+              <ShortcutLink href={course.assignmentsUrl} label="Assignments" course={course.name} icon={DocumentTextIcon} />
             )}
           </div>
         </div>

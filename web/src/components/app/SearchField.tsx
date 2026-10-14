@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { Search, X } from 'lucide-react'
+import { CloseIcon, MagnifierIcon } from '@solar-icons/react/linear'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,7 +18,7 @@ export function SearchField({ value, onChange }: SearchFieldProps) {
         Search subjects, professors, events or locations
       </Label>
       <div className="relative">
-        <Search
+        <MagnifierIcon
           aria-hidden="true"
           className="pointer-events-none absolute top-1/2 left-3 size-5 -translate-y-1/2 text-muted-foreground"
         />
@@ -50,7 +50,7 @@ export function SearchField({ value, onChange }: SearchFieldProps) {
               inputRef.current?.focus()
             }}
           >
-            <X aria-hidden="true" />
+            <CloseIcon aria-hidden="true" className="size-5" />
           </Button>
         )}
       </div>

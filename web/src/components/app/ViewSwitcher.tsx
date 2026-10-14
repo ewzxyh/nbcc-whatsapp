@@ -1,12 +1,12 @@
-import { CalendarDays, Kanban, Tags, type LucideIcon } from 'lucide-react'
+import { CalendarIcon, KanbanIcon, TagIcon } from '@solar-icons/react/linear'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 export type ViewId = 'subjects' | 'calendar' | 'board'
 
-const VIEWS: { id: ViewId; label: string; icon: LucideIcon }[] = [
-  { id: 'subjects', label: 'Subjects', icon: Tags },
-  { id: 'calendar', label: 'Calendar', icon: CalendarDays },
-  { id: 'board', label: 'Board', icon: Kanban },
+const VIEWS: { id: ViewId; label: string; icon: typeof TagIcon }[] = [
+  { id: 'subjects', label: 'Subjects', icon: TagIcon },
+  { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
+  { id: 'board', label: 'Board', icon: KanbanIcon },
 ]
 
 interface ViewSwitcherProps {
@@ -35,7 +35,7 @@ export function ViewSwitcher({ value, onChange }: ViewSwitcherProps) {
             value={id}
             className="flex h-auto min-h-16 w-full min-w-0 flex-col items-center justify-center gap-1 rounded-xl border border-input bg-background px-1 py-2 text-base font-medium text-foreground transition-colors data-[state=off]:hover:bg-surface data-[state=on]:border-2 data-[state=on]:border-primary data-[state=on]:bg-accent data-[state=on]:font-semibold data-[state=on]:text-accent-foreground"
           >
-            <Icon aria-hidden="true" className="size-5" />
+            <Icon aria-hidden="true" className="size-6" />
             <span className="max-w-full truncate">{label}</span>
           </ToggleGroupItem>
         ))}

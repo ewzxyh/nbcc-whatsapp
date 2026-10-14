@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { CloseIcon } from '@solar-icons/react/linear'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -50,7 +50,7 @@ export function FilterPanel({
 
       {filtersActive && (
         <Button variant="outline" onClick={onClearFilters}>
-          <X aria-hidden="true" />
+          <CloseIcon aria-hidden="true" />
           Clear filters
         </Button>
       )}

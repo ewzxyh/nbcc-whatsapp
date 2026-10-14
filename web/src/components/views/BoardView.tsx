@@ -49,7 +49,7 @@ export default function BoardView({
       {entries.length === 0 ? (
         <EmptyAgenda filtersActive={filtersActive} onClearFilters={onClearFilters} />
       ) : (
-        <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(100%,17rem),1fr))] gap-4">
+        <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(100%,24rem),1fr))] gap-4">
           {columns.map((column, index) => {
             const headingId = `board-column-${index}`
             return (

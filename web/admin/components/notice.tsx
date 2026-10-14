@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { CircleAlert, CircleCheck, Info } from 'lucide-react'
+import { CheckCircleIcon, DangerCircleIcon, InfoCircleIcon } from '@solar-icons/react/linear'
 import { cn } from '@/lib/utils'
 
 type Tone = 'success' | 'error' | 'info'
@@ -12,7 +12,7 @@ interface NoticeProps {
 
 // Errors use role="alert". Success and info use role="status". Each has an icon and text, never colour alone.
 export function Notice({ tone = 'info', children, className }: NoticeProps) {
-  const Icon = tone === 'error' ? CircleAlert : tone === 'success' ? CircleCheck : Info
+  const Icon = tone === 'error' ? DangerCircleIcon : tone === 'success' ? CheckCircleIcon : InfoCircleIcon
   return (
     <div
       role={tone === 'error' ? 'alert' : 'status'}

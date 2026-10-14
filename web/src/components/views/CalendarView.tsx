@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { AltArrowLeftIcon, AltArrowRightIcon } from '@solar-icons/react/linear'
 import { EntryCard } from '@/components/agenda/EntryCard'
 import { EmptyAgenda } from '@/components/agenda/AgendaStates'
 import { Button } from '@/components/ui/button'
@@ -105,7 +105,7 @@ export default function CalendarView({
         <h2 ref={headingRef} tabIndex={-1} className="rounded-md text-2xl font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">{monthTitle}</h2>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" aria-label="Previous month" onClick={onPreviousMonth} className="px-3">
-            <ChevronLeft aria-hidden="true" />
+            <AltArrowLeftIcon aria-hidden="true" />
             Previous
           </Button>
           <Button variant="outline" aria-label="Go to today" onClick={onToday} className="px-3">
@@ -113,7 +113,7 @@ export default function CalendarView({
           </Button>
           <Button variant="outline" aria-label="Next month" onClick={onNextMonth} className="px-3">
             Next
-            <ChevronRight aria-hidden="true" />
+            <AltArrowRightIcon aria-hidden="true" />
           </Button>
         </div>
       </div>

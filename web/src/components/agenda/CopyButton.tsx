@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy } from 'lucide-react'
+import { CheckIcon, CopyIcon } from '@solar-icons/react/linear'
 import { Button } from '@/components/ui/button'
 import type { AgendaEntry } from '@/lib/agenda'
 import { copyText } from '@/lib/clipboard'
@@ -39,7 +39,7 @@ export function CopyButton({ entry }: { entry: AgendaEntry }) {
         aria-label={`Copy details for ${entry.title}`}
         className="min-w-0 w-full sm:w-auto"
       >
-        {state === 'copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+        {state === 'copied' ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
         {state === 'copied' ? 'Copied' : 'Copy details'}
       </Button>
       <p role="status" className="text-sm text-muted-foreground empty:hidden">

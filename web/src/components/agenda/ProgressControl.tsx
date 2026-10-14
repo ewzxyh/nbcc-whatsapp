@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { Check } from 'lucide-react'
+import { CheckIcon } from '@solar-icons/react/linear'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   EMPTY_PROGRESS,
@@ -35,7 +35,7 @@ export function ProgressControl({ storageKey, title }: { storageKey: string; tit
     >
       {OPTIONS.map((option) => (
         <ToggleGroupItem key={option.value} value={option.value} className={ITEM_CLASS}>
-          <Check aria-hidden="true" className="hidden size-4 shrink-0 group-data-[state=on]/item:block" />
+          <CheckIcon aria-hidden="true" className="hidden size-4.5 shrink-0 group-data-[state=on]/item:block" />
           <span>{option.label}</span>
         </ToggleGroupItem>
       ))}

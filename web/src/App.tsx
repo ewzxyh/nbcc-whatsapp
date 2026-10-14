@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CircleAlert, Info, RefreshCw } from 'lucide-react'
+import { DangerCircleIcon, InfoCircleIcon, RefreshIcon } from '@solar-icons/react/linear'
 import { ItemDetailsSheet } from '@/components/agenda/ItemDetailsSheet'
 import { AgendaSkeleton } from '@/components/agenda/AgendaStates'
 import { AppHeader } from '@/components/app/AppHeader'
@@ -184,12 +184,12 @@ export default function App() {
           {activeError && (
             <div className="space-y-3">
               <Alert variant="destructive" className="border-destructive bg-destructive-subtle">
-                <CircleAlert aria-hidden="true" />
+                <DangerCircleIcon aria-hidden="true" />
                 <AlertTitle>Agenda unavailable</AlertTitle>
                 <AlertDescription>{activeError.message}</AlertDescription>
               </Alert>
               <Button variant="outline" onClick={refresh}>
-                <RefreshCw aria-hidden="true" />
+                <RefreshIcon aria-hidden="true" />
                 Try again
               </Button>
             </div>
@@ -197,7 +197,7 @@ export default function App() {
 
           {omittedNotice && (
             <Alert role="status" className="border-input">
-              <Info aria-hidden="true" />
+              <InfoCircleIcon aria-hidden="true" />
               <AlertDescription className="text-foreground">{omittedNotice}</AlertDescription>
             </Alert>
           )}

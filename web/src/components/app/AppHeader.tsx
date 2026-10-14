@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react'
+import { RefreshIcon } from '@solar-icons/react/linear'
 import { Button } from '@/components/ui/button'
 import { formatUpdated, TIMEZONE_NOTE } from '@/lib/agenda'
 import { cn } from '@/lib/utils'
@@ -27,7 +27,7 @@ export function AppHeader({ updatedAt, now, refreshing, onRefresh }: AppHeaderPr
           )}
         </div>
         <Button variant="outline" onClick={onRefresh}>
-          <RefreshCw aria-hidden="true" className={cn(refreshing && 'animate-spin')} />
+          <RefreshIcon aria-hidden="true" className={cn(refreshing && 'animate-spin')} />
           Refresh
         </Button>
       </div>
