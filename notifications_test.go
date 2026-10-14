@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -152,8 +153,99 @@ func TestReminderThresholdsUseDueAndSurviveRestart(t *testing.T) {
 	h.clock.advance(4 * time.Hour)
 	h.app.schedule(ctx)
 	h.app.processPending(ctx)
-	if posts, _ := h.up.snapshot(); posts != 3 {
-		t.Fatal("expired reminder sent")
+	if posts, _ := h.up.snapshot(); posts != 4 || strings.Contains(h.up.sent[3], "Deadline") {
+		t.Fatal("expired activity was not removed from the updated agenda", h.up.sent)
+	}
+}
+
+func TestDuePassageUpdatesAgendaWithoutFeedChange(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.up.feed = testICS(testEvent("soon", "Expiring - Due", ";TZID=America/Halifax:20261013T140030", ""), testEvent("later", "Upcoming - Due", ";VALUE=DATE:20261015", ""))
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	if _, _, err := h.app.check(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.processPending(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.advance(30 * time.Second)
+	if err := h.app.schedule(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if pending, _ := h.app.store.counts(); pending != 1 {
+		t.Fatal("deadline passage did not queue the remaining agenda", pending)
+	}
+	if err := h.app.processPending(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if posts, _ := h.up.snapshot(); posts != 2 || strings.Contains(h.up.sent[1], "Expiring") || !strings.Contains(h.up.sent[1], "Upcoming") {
+		t.Fatal("sent an expired Due or lost the future one", h.up.sent)
+	}
+}
+
+func TestExpiredDueCannotSurviveRetry(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.up.feed = testICS(testEvent("soon", "Expiring - Due", ";TZID=America/Halifax:20261013T140030", ""), testEvent("later", "Upcoming - Due", ";VALUE=DATE:20261015", ""))
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	var texts, keys []string
+	h.up.hook = func(r *http.Request) (*http.Response, bool) {
+		if r.Method != "POST" {
+			return nil, false
+		}
+		var body struct{ Text string }
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		texts = append(texts, body.Text)
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		if len(texts) == 1 {
+			return testResponse(503, `{}`), true
+		}
+		return testResponse(202, `{}`), true
+	}
+	h.app.processPending(ctx)
+	h.clock.advance(2 * time.Minute)
+	h.app.processPending(ctx)
+	if len(texts) != 2 || !strings.Contains(texts[0], "Expiring") || strings.Contains(texts[1], "Expiring") || !strings.Contains(texts[1], "Upcoming") || keys[0] == keys[1] {
+		t.Fatal("expired retry body was sent or its idempotency key was reused", texts, keys)
+	}
+}
+
+func TestDuePassageStopsRemainingAgendaParts(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	events := []string{testEvent("soon", "Expiring - Due", ";TZID=America/Halifax:20261013T140030", "")}
+	for i := 0; i < 80; i++ {
+		events = append(events, testEvent(fmt.Sprint(i), fmt.Sprint(i)+strings.Repeat("Long title ", 8)+" - Due", ";VALUE=DATE:20261015", ""))
+	}
+	h.up.feed = testICS(events...)
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	h.up.hook = func(r *http.Request) (*http.Response, bool) {
+		if r.Method == "POST" {
+			h.clock.advance(time.Minute)
+		}
+		return nil, false
+	}
+	if err := h.app.processPending(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if posts, _ := h.up.snapshot(); posts != 1 {
+		t.Fatal("continued the old batch after its Due passed", posts)
+	}
+	h.up.hook = nil
+	h.app.schedule(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts < 2 {
+		t.Fatal("remaining future activities were not sent")
+	}
+	for _, text := range h.up.sent[1:] {
+		if strings.Contains(text, "Expiring") {
+			t.Fatal("expired Due appeared in the rebuilt batch", text)
+		}
 	}
 }
 

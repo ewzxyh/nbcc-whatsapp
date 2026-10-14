@@ -29,6 +29,7 @@ type Preview struct {
 	FetchedAt     time.Time `json:"fetched_at"`
 	OmittedEvents int       `json:"omitted_events"`
 	deadlines     []deadline
+	validUntil    time.Time
 }
 
 func midnight(t time.Time) time.Time {
@@ -86,40 +87,34 @@ type deadline struct {
 func buildPreview(raw []byte, now time.Time, idKey []byte) (Preview, error) {
 	start := midnight(now)
 	end := start.AddDate(0, 0, 15)
-	p := Preview{From: start.Format(dateLayout), Through: end.AddDate(0, 0, -1).Format(dateLayout), FetchedAt: now}
+	p := Preview{From: start.Format(dateLayout), Through: end.AddDate(0, 0, -1).Format(dateLayout), FetchedAt: now, validUntil: start.AddDate(0, 0, 1)}
 	items, omitted, err := buildAgenda(raw, start, end, nil, idKey)
 	if err != nil {
 		return p, err
 	}
 	p.OmittedEvents = len(omitted)
-	groups := map[string]map[string]agendaItem{}
-	for _, it := range items {
-		if it.Type != "activity" {
-			continue
-		}
-		id := *it.ActivityID
-		if groups[id] == nil {
-			groups[id] = map[string]agendaItem{}
-		}
-		groups[id][*it.Phase] = it
-	}
 	type row struct {
 		at             time.Time
 		text, identity string
 	}
 	rows := []row{}
-	for id, phases := range groups {
-		it, ok := phases["due"]
-		label := "due"
-		if !ok {
-			it, ok = phases["available"]
-			label = "available"
+	for _, it := range items {
+		if it.Type != "activity" || *it.Phase != "due" {
+			continue
 		}
-		if !ok {
-			it = phases["closes"]
-			label = "access closes"
+		at := it.at
+		// A date-only delivery deadline lasts through the end of that local date.
+		if it.AllDay {
+			at = midnight(at).AddDate(0, 0, 1).Add(-time.Second)
 		}
-		when := " on this date"
+		if !now.Before(at) {
+			continue
+		}
+		p.deadlines = append(p.deadlines, deadline{ID: *it.ActivityID, At: at})
+		if at.Before(p.validUntil) {
+			p.validUntil = at
+		}
+		when := " by *23:59*"
 		if !it.AllDay {
 			when = " at *" + it.at.In(halifax).Format("15:04") + "*"
 		}
@@ -128,39 +123,16 @@ func buildPreview(raw []byte, now time.Time, idKey []byte) (Preview, error) {
 			course = "*" + *it.Course + "* — "
 		}
 		title := "*" + it.Title + "*"
-		text := "• " + course + title + ": " + label + when + "."
-		if closes, ok := phases["closes"]; ok && label != "access closes" && !closes.at.Equal(it.at) {
-			close := closes.at.In(halifax).Format("15:04")
-			if closes.AllDay {
-				close = closes.at.Format("Jan 2")
-			} else if !midnight(closes.at).Equal(midnight(it.at)) {
-				close = closes.at.Format("Jan 2 at 15:04")
-			}
-			text += " Access closes "
-			if !closes.AllDay {
-				text += "at "
-			} else {
-				text += "on "
-			}
-			text += close + "."
-		}
+		text := "• " + course + title + ": Due" + when + "."
 		// Compare visible content, excluding the moving heading and countdown labels.
 		identity := it.at.Format(time.RFC3339) + "\x00" + text
-		if due, ok := phases["due"]; ok {
-			at := due.at
-			// A date-only delivery deadline lasts through the end of that local date.
-			if due.AllDay {
-				at = midnight(at).AddDate(0, 0, 1).Add(-time.Second)
+		if left := at.Sub(now); left <= 14*time.Hour {
+			minutes := int((left + time.Minute - 1) / time.Minute)
+			warning := fmt.Sprintf("%d hours left", (minutes+59)/60)
+			if minutes%60 != 0 {
+				warning = fmt.Sprintf("%dh %02dm left", minutes/60, minutes%60)
 			}
-			p.deadlines = append(p.deadlines, deadline{ID: id, At: at})
-			if left := at.Sub(now); left > 0 && left <= 14*time.Hour {
-				minutes := int((left + time.Minute - 1) / time.Minute)
-				warning := fmt.Sprintf("%d hours left", (minutes+59)/60)
-				if minutes%60 != 0 {
-					warning = fmt.Sprintf("%dh %02dm left", minutes/60, minutes%60)
-				}
-				text = strings.Replace(text, title, "⚠️ *_"+warning+"_* "+title, 1)
-			}
+			text = strings.Replace(text, title, "⚠️ *_"+warning+"_* "+title, 1)
 		}
 		rows = append(rows, row{it.at.In(halifax), text, identity})
 	}
@@ -186,7 +158,7 @@ func buildPreview(raw []byte, now time.Time, idKey []byte) (Preview, error) {
 		fmt.Fprintln(&b, r.text)
 	}
 	if len(rows) == 0 {
-		b.WriteString("\n• No scheduled labs, quizzes or assignments in this period.\n")
+		b.WriteString("\n• No upcoming labs, quizzes or assignments with a Due date in this period.\n")
 	}
 	hash := sha256.Sum256([]byte(canonical.String()))
 	p.FeedHash = hex.EncodeToString(hash[:])
