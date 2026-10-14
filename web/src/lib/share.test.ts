@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupEntries } from './agenda'
+import { describePhase, displayTitle, groupEntries, isLockDownAssessment } from './agenda'
 import { assessmentKind, formatCopyText } from './share'
 import type { AgendaItem } from './api'
 
@@ -22,6 +22,16 @@ const phase = (overrides: Partial<AgendaItem>): AgendaItem => ({
 })
 
 describe('formatCopyText', () => {
+  it('shows the Due time as the start of a LockDown assessment without losing its browser requirement', () => {
+    const due = phase({ title: 'Sample Quiz - Requires Respondus LockDown Browser' })
+    const [entry] = groupEntries([due])
+    expect(describePhase(due, due.date, true)).toBe('Starts at 11:59 PM')
+    const text = formatCopyText(entry)
+    expect(text).toContain('Assessment: Sample Quiz\n')
+    expect(text).toContain('LockDown Browser required')
+    expect(text).toContain('Starts: Wednesday, October 14, 2026 at 11:59 PM')
+    expect(text).not.toContain('Due:')
+  })
   it('includes subject, assessment, professor and due date with time', () => {
     const [entry] = groupEntries([phase({})])
     const text = formatCopyText(entry)
@@ -65,5 +75,28 @@ describe('assessmentKind', () => {
     expect(assessmentKind('Final Project Proposal')).toBe('Project')
     expect(assessmentKind('Final exam')).toBe('Exam')
     expect(assessmentKind('Week 4 reading')).toBeNull()
+  })
+})
+
+describe('LockDown assessments', () => {
+  it.each([
+    ['Sample Quiz - Requires Respondus LockDown Browser', 'Sample Quiz'],
+    ['Sample Quiz — lockdown browser required', 'Sample Quiz'],
+    ['LockDown Browser: Sample Quiz', 'Sample Quiz'],
+    ['Requires Respondus LockDown Browser', 'Assessment'],
+  ])('moves the requirement out of %s without changing the source title', (title, expected) => {
+    const [entry] = groupEntries([phase({ title })])
+    expect(isLockDownAssessment(entry)).toBe(true)
+    expect(displayTitle(entry)).toBe(expected)
+    expect(entry.title).toBe(title)
+  })
+
+  it('leaves ordinary assessments and campus events unchanged', () => {
+    const [ordinary] = groupEntries([phase({ title: 'Sample Quiz' })])
+    const [campus] = groupEntries([phase({ type: 'event', phase: null, title: 'LockDown Browser Information Session' })])
+    for (const entry of [ordinary, campus]) {
+      expect(isLockDownAssessment(entry)).toBe(false)
+      expect(displayTitle(entry)).toBe(entry.title)
+    }
   })
 })

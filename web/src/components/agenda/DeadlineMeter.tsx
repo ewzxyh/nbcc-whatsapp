@@ -6,9 +6,9 @@ import { useNow } from '@/hooks/useNow'
 import { cn } from '@/lib/utils'
 
 /** Countdown badge for one phase or event, e.g. "Due in 2 d 4 h". Text is updated once a minute. */
-export function PhaseTimer({ item }: { item: AgendaItem }) {
+export function PhaseTimer({ item, starts = false }: { item: AgendaItem; starts?: boolean }) {
   const now = useNow()
-  const { text, passed } = countdownFor(item, now)
+  const { text, passed } = countdownFor(item, now, starts)
   return (
     <Badge
       variant="outline"

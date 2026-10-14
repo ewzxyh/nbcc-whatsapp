@@ -62,6 +62,14 @@ describe('itemInstant', () => {
 describe('countdownFor', () => {
   const due = Date.parse('2026-10-14T23:59:00-03:00')
 
+  it('uses start wording for assessments while retaining the original Due instant', () => {
+    const assessment = item({ title: 'Sample Quiz - Requires Respondus LockDown Browser' })
+    expect(countdownFor(assessment, due - HOUR, true)).toEqual({ text: 'Starts in 1 h 0 min', passed: false })
+    expect(countdownFor(assessment, due, true)).toEqual({ text: 'Started', passed: true })
+    expect(countdownFor({ ...assessment, phase: 'available' }, due - HOUR, true).text).toBe('Opens in 1 h 0 min')
+    expect(itemInstant(assessment)).toBe(due)
+  })
+
   it('counts down in days and hours', () => {
     expect(countdownFor(item({}), due - 2 * DAY - 4 * HOUR)).toEqual({ text: 'Due in 2 d 4 h', passed: false })
   })

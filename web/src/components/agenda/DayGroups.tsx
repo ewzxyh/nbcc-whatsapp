@@ -1,5 +1,5 @@
 import { EntryCard } from './EntryCard'
-import { formatDayLabel, formatShortDay, type AgendaEntry, type DayGroup } from '@/lib/agenda'
+import { formatDayLabel, formatShortDay, isLockDownAssessment, type AgendaEntry, type DayGroup } from '@/lib/agenda'
 import { cn } from '@/lib/utils'
 
 interface DayGroupsProps {
@@ -16,11 +16,12 @@ export function DayGroups({ groups, today, onSelect }: DayGroupsProps) {
         const short = formatShortDay(group.date)
         const headingId = `day-${group.date}`
         const isToday = group.date === today
+        const assessmentDay = group.entries.some(isLockDownAssessment)
         return (
           <section
             key={group.date}
             aria-labelledby={headingId}
-            className={cn('space-y-3', isToday && 'rounded-2xl border border-today-border bg-today p-3 sm:p-4')}
+            className={cn('space-y-3', assessmentDay ? 'rounded-2xl border border-destructive bg-destructive-subtle p-3 sm:p-4' : isToday && 'rounded-2xl border border-today-border bg-today p-3 sm:p-4')}
           >
             <h2 id={headingId} className="text-xl font-semibold text-foreground">
               {label}

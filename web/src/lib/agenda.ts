@@ -37,6 +37,19 @@ export interface EventEntry {
 
 export type AgendaEntry = ActivityEntry | EventEntry
 
+export function isLockDownAssessment(entry: AgendaEntry): boolean {
+  return entry.kind === 'activity' && /\blockdown\s+browser\b/i.test(entry.title)
+}
+
+export function displayTitle(entry: AgendaEntry): string {
+  if (!isLockDownAssessment(entry)) return entry.title
+  return entry.title
+    .replace(/\s*[-–—:]?\s*(?:requires?\s+)?(?:respondus\s+)?lockdown\s+browser(?:\s+required)?/gi, ' ')
+    .replace(/^[\s\-–—:]+|[\s\-–—:]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim() || 'Assessment'
+}
+
 export interface AgendaFilters {
   query: string
   subjects: readonly string[]
@@ -230,12 +243,12 @@ export function formatEventTime(item: AgendaItem): string {
   return formatTimeRange(item.startAt, item.endAt)
 }
 
-export function phaseLabel(phase: Phase | null): string {
+export function phaseLabel(phase: Phase | null, starts = false): string {
   switch (phase) {
     case 'available':
       return 'Opens'
     case 'due':
-      return 'Due'
+      return starts ? 'Starts' : 'Due'
     case 'closes':
       return 'Access closes'
     default:
@@ -244,10 +257,11 @@ export function phaseLabel(phase: Phase | null): string {
 }
 
 /** Phase line such as "Due 11:59 PM"; the date is added when it differs from the card's day. */
-export function describePhase(item: AgendaItem, cardDate: string): string {
+export function describePhase(item: AgendaItem, cardDate: string, starts = false): string {
   const day = item.date === cardDate ? '' : `${formatMonthDay(item.date)}, `
   const time = item.allDay || !item.startAt ? 'all day' : formatTime(item.startAt)
-  return `${phaseLabel(item.phase)} ${day}${time}`
+  const at = starts && item.phase === 'due' && item.date === cardDate && !item.allDay && item.startAt ? ' at' : ''
+  return `${phaseLabel(item.phase, starts)}${at} ${day}${time}`
 }
 
 export function timingBucket(date: string, today: string): TimingBucket {

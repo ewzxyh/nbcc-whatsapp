@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { CheckIcon, CopyIcon } from '@solar-icons/react/linear'
 import { Button } from '@/components/ui/button'
-import type { AgendaEntry } from '@/lib/agenda'
+import { displayTitle, type AgendaEntry } from '@/lib/agenda'
 import { copyText } from '@/lib/clipboard'
 import { formatCopyText } from '@/lib/share'
 
@@ -36,7 +36,7 @@ export function CopyButton({ entry }: { entry: AgendaEntry }) {
       <Button
         variant="outline"
         onClick={onCopy}
-        aria-label={`Copy details for ${entry.title}`}
+        aria-label={`Copy details for ${displayTitle(entry)}`}
         className="min-w-0 w-full sm:w-auto"
       >
         {state === 'copied' ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}

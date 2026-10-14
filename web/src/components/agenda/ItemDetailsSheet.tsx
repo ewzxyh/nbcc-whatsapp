@@ -1,4 +1,5 @@
 import type { ReactNode, RefObject } from 'react'
+import { ClipboardCheckIcon, LockKeyholeIcon } from '@solar-icons/react/linear'
 import { CopyButton } from '@/components/agenda/CopyButton'
 import { PhaseIcon, PhaseTimer, TimeLeftMeter } from '@/components/agenda/DeadlineMeter'
 import { ProgressControl } from '@/components/agenda/ProgressControl'
@@ -16,9 +17,11 @@ import {
 import {
   CAMPUS_EVENT_LABEL,
   courseLabel,
+  displayTitle,
   formatEventTime,
   formatLongDate,
   formatTime,
+  isLockDownAssessment,
   phaseLabel,
   phasesForEntry,
   TIMEZONE_NOTE,
@@ -55,6 +58,7 @@ export function ItemDetailsSheet({ entry, open, onOpenChange, allItems, desktop,
         className={cn(
           'flex max-h-[85dvh] flex-col gap-0 p-0',
           desktop ? 'sm:max-w-lg' : 'rounded-t-2xl',
+          entry && isLockDownAssessment(entry) && 'border-destructive bg-destructive-subtle',
         )}
       >
         {entry && <EntryDetails entry={entry} allItems={allItems} />}
@@ -73,6 +77,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 }
 
 function EntryDetails({ entry, allItems }: { entry: AgendaEntry; allItems: AgendaItem[] }) {
+  const assessment = isLockDownAssessment(entry)
   const phases = phasesForEntry(entry, allItems)
   const kind = entry.kind === 'activity' ? assessmentKind(entry.title) : null
   const knownOpening = useOpeningAt(entry.kind === 'activity' ? entry.activityId : null)
@@ -84,21 +89,32 @@ function EntryDetails({ entry, allItems }: { entry: AgendaEntry; allItems: Agend
     <>
       <SheetHeader className="gap-2 p-5 pb-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge className="bg-accent text-accent-foreground">
+          <Badge className={assessment ? 'bg-destructive text-primary-foreground' : 'bg-accent text-accent-foreground'}>
             {entry.kind === 'activity' ? (entry.course ?? 'Course') : CAMPUS_EVENT_LABEL}
           </Badge>
           {kind && (
-            <Badge variant="outline" className="border-input text-foreground">
+            <Badge variant="outline" className={assessment ? 'border-destructive text-destructive' : 'border-input text-foreground'}>
               {kind}
             </Badge>
           )}
+          {assessment && (
+            <Badge variant="outline" className="border-destructive bg-destructive-subtle whitespace-normal text-destructive">
+              <LockKeyholeIcon aria-hidden="true" className="size-4 shrink-0" />
+              LockDown Browser required
+            </Badge>
+          )}
         </div>
-        <SheetTitle className="text-xl leading-snug break-words">{entry.title}</SheetTitle>
+        <SheetTitle className="text-xl leading-snug break-words">{displayTitle(entry)}</SheetTitle>
         <SheetDescription className="text-base break-words">{courseLabel(entry)}</SheetDescription>
       </SheetHeader>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 pb-4">
-        {entry.kind === 'activity' && (
+        {assessment ? (
+          <Badge className="min-h-11 gap-2 border border-destructive bg-destructive px-4 py-2 text-base font-semibold text-primary-foreground">
+            <ClipboardCheckIcon aria-hidden="true" className="size-5 shrink-0" />
+            Assessment / Test
+          </Badge>
+        ) : entry.kind === 'activity' && (
           <section aria-labelledby="sheet-progress-label" className="space-y-2">
             <p id="sheet-progress-label" className="text-base font-medium text-foreground">
               Progress
@@ -111,7 +127,7 @@ function EntryDetails({ entry, allItems }: { entry: AgendaEntry; allItems: Agend
         <dl className="space-y-5">
           {entry.kind === 'activity' &&
             phases.map((phase) => (
-              <DetailRow key={phase.id} label={phaseLabel(phase.phase)}>
+              <DetailRow key={phase.id} label={phaseLabel(phase.phase, assessment)}>
                 <span className="flex items-center gap-2">
                   <PhaseIcon phase={phase.phase} />
                   <span>{formatLongDate(phase.date)}</span>
@@ -120,7 +136,7 @@ function EntryDetails({ entry, allItems }: { entry: AgendaEntry; allItems: Agend
                   {phase.allDay || !phase.startAt ? 'All day' : formatTime(phase.startAt)}
                 </span>
                 <span className="mt-2 flex flex-col items-start gap-1">
-                  <PhaseTimer item={phase} />
+                  <PhaseTimer item={phase} starts={assessment} />
                   {phase.phase === 'due' && <TimeLeftMeter item={phase} openedAt={openedAt} />}
                 </span>
               </DetailRow>

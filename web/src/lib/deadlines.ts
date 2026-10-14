@@ -80,8 +80,8 @@ export interface Countdown {
 }
 
 /** Countdown for one item, such as "Due in 2 d 4 h" or "Past due". */
-export function countdownFor(item: AgendaItem, now: number): Countdown {
-  const key = item.type === 'event' ? 'event' : (item.phase ?? 'due')
+export function countdownFor(item: AgendaItem, now: number, starts = false): Countdown {
+  const key = item.type === 'event' || starts && item.phase === 'due' ? 'event' : (item.phase ?? 'due')
   const remaining = itemInstant(item) - now
   if (remaining <= 0) return { text: PASSED_LABEL[key], passed: true }
   return { text: `${UPCOMING_LABEL[key]} ${durationText(remaining)}`, passed: false }

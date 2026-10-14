@@ -39,6 +39,8 @@ site público, e não há nenhum link para ela no site público.
 
 ## Notes
 
+- Activities whose title mentions LockDown Browser have red assessment cards, a separate browser-requirement badge, and the supplied chimp illustration. They show an **Assessment / Test** badge instead of progress controls.
+- For these activities, the public UI and copied details deliberately label the feed's **Due** time as **Starts**, as requested. This does not infer an opening time or change the feed, API phases, or WhatsApp deadline notifications.
 - Tests and fixtures use synthetic data only (`src/test/fixtures.ts`). No real calendar data is committed.
 - Light theme only. Design tokens are CSS variables in `src/index.css`.
 - `src/components/ui` holds shadcn/ui components with shadows removed; keep it shadow-free (a test checks this).

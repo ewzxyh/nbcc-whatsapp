@@ -1,4 +1,4 @@
-import { CAMPUS_EVENT_LABEL, courseLabel, formatLongDate, formatTime, phaseLabel, type AgendaEntry } from './agenda'
+import { CAMPUS_EVENT_LABEL, courseLabel, displayTitle, formatLongDate, formatTime, isLockDownAssessment, phaseLabel, type AgendaEntry } from './agenda'
 import type { AgendaItem } from './api'
 
 // Order matters: "Final Project" must match Project before the Exam pattern sees "final".
@@ -32,10 +32,11 @@ export function formatCopyText(entry: AgendaEntry): string {
     if (entry.item.location) lines.push(`Location: ${entry.item.location}`)
   } else {
     lines.push(`Subject: ${courseLabel(entry)}`)
-    lines.push(`Assessment: ${entry.title}`)
+    lines.push(`Assessment: ${displayTitle(entry)}`)
+    if (isLockDownAssessment(entry)) lines.push('LockDown Browser required')
     if (entry.instructor) lines.push(`Professor: ${entry.instructor}`)
     for (const phase of entry.phases) {
-      lines.push(`${phaseLabel(phase.phase)}: ${whenText(phase)}`)
+      lines.push(`${phaseLabel(phase.phase, isLockDownAssessment(entry))}: ${whenText(phase)}`)
     }
   }
   lines.push('Times: Saint John, NB (Atlantic Time)')

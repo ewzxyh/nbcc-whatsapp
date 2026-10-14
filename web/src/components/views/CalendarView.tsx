@@ -9,6 +9,7 @@ import {
   formatLongDate,
   formatMonthTitle,
   groupEntries,
+  isLockDownAssessment,
   monthGrid,
   type AgendaEntry,
 } from '@/lib/agenda'
@@ -151,7 +152,7 @@ export default function CalendarView({
       </table>
       <p className="text-sm text-muted-foreground">The number under each date is how many items fall on that day.</p>
 
-      <section aria-labelledby="calendar-day-heading" className="space-y-3">
+      <section aria-labelledby="calendar-day-heading" className={cn('space-y-3', dayEntries.some(isLockDownAssessment) && 'rounded-2xl border border-destructive bg-destructive-subtle p-3 sm:p-4')}>
         {selectedDate ? (
           <>
             <h2 id="calendar-day-heading" className="text-xl font-semibold text-foreground">

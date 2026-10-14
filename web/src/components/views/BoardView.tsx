@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { EmptyAgenda } from '@/components/agenda/AgendaStates'
 import { EntryCard } from '@/components/agenda/EntryCard'
 import { ChoiceGroup } from '@/components/app/ChoiceGroup'
-import { formatCount, subjectColumns, timingColumns, type AgendaEntry } from '@/lib/agenda'
+import { formatCount, isLockDownAssessment, subjectColumns, timingColumns, type AgendaEntry } from '@/lib/agenda'
 import { cn } from '@/lib/utils'
 
 export type BoardGroup = 'timing' | 'subject'
@@ -58,7 +58,7 @@ export default function BoardView({
                 aria-labelledby={headingId}
                 className={cn(
                   'flex min-w-0 flex-col gap-3 rounded-2xl border p-3',
-                  column.id === 'today' ? 'border-today-border bg-today' : 'border-border bg-surface',
+                  column.entries.some(isLockDownAssessment) ? 'border-destructive bg-destructive-subtle' : column.id === 'today' ? 'border-today-border bg-today' : 'border-border bg-surface',
                 )}
               >
                 <div className="flex items-start justify-between gap-2 px-1">
