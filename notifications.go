@@ -145,21 +145,21 @@ func (a *App) pollCommands(ctx context.Context) error {
 	}
 }
 
-func (a *App) recentAgenda(ctx context.Context, s Settings, p Preview) (bool, error) {
-	same, hash := a.store.recent(p.FeedHash, deliveryTarget(s, a.settings.key), p.isCampus)
-	if !same {
-		return false, nil
+func (a *App) recentAgenda(ctx context.Context, s Settings, p Preview) (*groupMessage, error) {
+	hashes := a.store.recentHashes(p.FeedHash, deliveryTarget(s, a.settings.key), p.isCampus)
+	if len(hashes) == 0 {
+		return nil, nil
 	}
 	page, err := a.groupMessages(ctx, s, 5, 0)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	for _, m := range page.Messages {
-		if *m.FromMe && textHash(m.Text) == hash {
-			return true, nil
+		if *m.FromMe && hashes[textHash(m.Text)] {
+			return &m, nil
 		}
 	}
-	return false, nil
+	return nil, nil
 }
 
 func (a *App) processPending(ctx context.Context) error {
@@ -233,13 +233,19 @@ func (a *App) processPending(ctx context.Context) error {
 				continue
 			}
 		}
-		if err == nil && job.Kind != "" && job.NextPart == 0 {
-			var recent bool
+		if err == nil && job.Kind != "" {
+			var recent *groupMessage
 			recent, err = a.recentAgenda(ctx, s, p)
 			failureCode = "grapnel_unavailable"
-			if recent {
-				job.Status, job.Text = "suppressed", ""
-				if err = a.store.update(job, a.now()); err != nil {
+			if recent != nil {
+				if job.Text != "" && job.MessageHash == textHash(recent.Text) {
+					job.NextPart = len(messageParts(job.Text))
+					err = a.store.complete(job, p, target, recent.Text, a.now())
+				} else {
+					job.Status, job.Text = "suppressed", ""
+					err = a.store.update(job, a.now())
+				}
+				if err != nil {
 					return err
 				}
 				continue
@@ -259,6 +265,12 @@ func (a *App) processPending(ctx context.Context) error {
 			}
 		}
 		parts := messageParts(job.Text)
+		if err == nil && job.Kind != "" && len(parts) > 0 && job.MessageHash == "" {
+			job.MessageHash = textHash(parts[len(parts)-1])
+			if err = a.store.update(job, a.now()); err != nil {
+				return err
+			}
+		}
 		if err == nil {
 			failureCode = "grapnel_unavailable"
 			for job.NextPart < len(parts) {

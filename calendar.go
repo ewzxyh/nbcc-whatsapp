@@ -19,6 +19,7 @@ import (
 
 var halifax, _ = time.LoadLocation("America/Halifax")
 var nbccActivityLinks = regexp.MustCompile(`https://elearning\.nbcc\.ca/[^\s<>"']+`)
+var lockDownRequirement = regexp.MustCompile(`(?i)\s*[-–—:]?\s*(?:requires?\s+)?(?:respondus\s+)?\blockdown\s+browser\b(?:\s+required)?`)
 
 const agendaLinkLabel = "\n\n🔗 *Full agenda:* "
 
@@ -134,10 +135,19 @@ func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string,
 		}
 		title := "*" + it.Title + "*"
 		text := "• " + course + title + ": Due" + when + "."
-		// Compare visible content, excluding the moving heading and countdown labels.
+		// Keep the existing semantic fingerprint independent of presentation and countdowns.
 		identity := it.at.Format(time.RFC3339) + "\x00" + text
 		p.activityVersions[it.notificationID] = it.notificationVersion
 		prefix := course
+		label := "Due"
+		if lockDownRequirement.MatchString(it.Title) {
+			name := strings.Trim(strings.Join(strings.Fields(lockDownRequirement.ReplaceAllString(it.Title, " ")), " "), " -–—:")
+			if name == "" {
+				name = "Assessment"
+			}
+			title, label = "*"+name+"*", "Starts"
+			prefix += "🔒 *ASSESSMENT / TEST — LockDown Browser required* "
+		}
 		if left := at.Sub(now); left <= 14*time.Hour || midnight(it.at).Equal(start) {
 			minutes := int((left + time.Minute - 1) / time.Minute)
 			warning := fmt.Sprintf("%d hours left", (minutes+59)/60)
@@ -151,7 +161,7 @@ func buildPreview(raw []byte, now time.Time, idKey []byte, publicBaseURL string,
 		if old, ok := previous[it.notificationID]; ok && old != it.notificationVersion {
 			prefix += "🔄 *UPDATED* 🔄 "
 		}
-		text = "• " + prefix + title + ": Due" + when + "."
+		text = "• " + prefix + title + ": " + label + when + "."
 		rows = append(rows, row{it.at.In(halifax), text, identity})
 	}
 	sort.Slice(rows, func(i, j int) bool {

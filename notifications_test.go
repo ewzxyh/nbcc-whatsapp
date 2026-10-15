@@ -528,6 +528,146 @@ func TestReminderRetryRechecksRecentConversation(t *testing.T) {
 	}
 }
 
+func TestDeliveredTimeoutDoesNotRepeatAtNextReminder(t *testing.T) {
+	for _, retryBeforeNextStage := range []bool{true, false} {
+		t.Run(fmt.Sprint(retryBeforeNextStage), func(t *testing.T) {
+			h := newHarness(t)
+			ctx := context.Background()
+			h.up.feed = testICS(testEvent("first", "Assignment - Due", ";TZID=America/Halifax:20261013T233000", ""), testEvent("second", "Lab - Due", ";TZID=America/Halifax:20261013T235959", ""))
+			h.settingsPatch(map[string]any{"sendEnabled": true})
+			h.app.check(ctx)
+			h.app.processPending(ctx)
+			h.clock.advance(5*time.Hour + 30*time.Minute)
+			h.up.hook = func(r *http.Request) (*http.Response, bool) {
+				if r.Method != http.MethodPost {
+					return nil, false
+				}
+				var body struct{ Text string }
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				h.up.posts++
+				h.up.sent = append(h.up.sent, body.Text)
+				h.up.messages = []groupMessage{{ID: "delivered-with-timeout", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: body.Text}}
+				return testResponse(504, `{"code":"whatsappunavailable"}`), true
+			}
+			h.app.schedule(ctx)
+			h.app.processPending(ctx)
+			if posts, _ := h.up.snapshot(); posts != 2 {
+				t.Fatal("did not reproduce delivered-but-unconfirmed reminder", posts)
+			}
+			h.up.hook = nil
+			store, err := openStore(h.app.store.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.app.store = store
+			if retryBeforeNextStage {
+				h.clock.advance(2 * time.Minute)
+				h.app.processPending(ctx)
+				h.clock.advance(28 * time.Minute)
+			} else {
+				h.clock.advance(30 * time.Minute)
+			}
+			h.app.schedule(ctx)
+			h.app.processPending(ctx)
+			if posts, _ := h.up.snapshot(); posts != 2 {
+				t.Fatal("resent an unchanged delivered agenda still in the latest five after HTTP 504", posts)
+			}
+			if pending, _ := h.app.store.counts(); pending != 0 || len(h.app.store.data.Reminders) != 4 {
+				t.Fatal("reminder stages were not consumed", pending, len(h.app.store.data.Reminders))
+			}
+			h.up.feed = strings.Replace(h.up.feed, "Assignment - Due", "Changed Assignment - Due", 1)
+			h.app.check(ctx)
+			h.app.processPending(ctx)
+			if posts, _ := h.up.snapshot(); posts != 3 {
+				t.Fatal("a real change was suppressed after recovering the timeout", posts)
+			}
+		})
+	}
+}
+
+func TestDeliveredLastPartTimeoutIsRecoveredFromHistory(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	events := []string{}
+	for i := 0; i < 13; i++ {
+		events = append(events, testEvent(fmt.Sprint(i), fmt.Sprint(i)+strings.Repeat(" long assessment title", 15)+" - Due", ";VALUE=DATE:20261015", ""))
+	}
+	h.up.feed = testICS(events...)
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.up.hook = func(r *http.Request) (*http.Response, bool) {
+		if r.Method != http.MethodPost {
+			return nil, false
+		}
+		var body struct{ Text string }
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		h.up.posts++
+		h.up.sent = append(h.up.sent, body.Text)
+		if h.up.posts == 2 {
+			h.up.messages = []groupMessage{{ID: "delivered-last-part", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: body.Text}}
+			return testResponse(504, `{}`), true
+		}
+		return testResponse(202, `{}`), true
+	}
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 {
+		t.Fatal("expected exactly two parts", posts)
+	}
+	h.up.hook = nil
+	h.clock.advance(2 * time.Minute)
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 {
+		t.Fatal("resent the delivered final part after a timeout", posts)
+	}
+	if pending, _ := h.app.store.counts(); pending != 0 || h.app.store.data.LastSentHash == "" {
+		t.Fatal("did not acknowledge the recovered delivery", pending)
+	}
+}
+
+func TestRecentAttemptDoesNotHideARevertedChange(t *testing.T) {
+	for _, timeout := range []bool{false, true} {
+		t.Run(fmt.Sprint(timeout), func(t *testing.T) {
+			h := newHarness(t)
+			ctx := context.Background()
+			raw := testICS(testEvent("due", "Original Lab - Due", ";VALUE=DATE:20261015", ""))
+			h.up.feed = raw
+			h.settingsPatch(map[string]any{"sendEnabled": true})
+			if timeout {
+				h.up.hook = func(r *http.Request) (*http.Response, bool) {
+					if r.Method != http.MethodPost {
+						return nil, false
+					}
+					var body struct{ Text string }
+					json.NewDecoder(r.Body).Decode(&body)
+					h.up.posts++
+					h.up.sent = append(h.up.sent, body.Text)
+					return testResponse(504, `{}`), true
+				}
+			}
+			h.app.check(ctx)
+			h.app.processPending(ctx)
+			h.up.hook = nil
+			h.up.messages = []groupMessage{{ID: "original", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: h.up.sent[0]}}
+			h.clock.advance(time.Minute)
+			h.up.feed = strings.Replace(raw, "Original", "Changed", 1)
+			h.app.check(ctx)
+			h.app.processPending(ctx)
+			h.up.messages = append(h.up.messages, groupMessage{ID: "changed", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: h.up.sent[1]})
+			h.clock.advance(time.Minute)
+			h.up.feed = raw
+			h.app.check(ctx)
+			h.app.processPending(ctx)
+			if posts, _ := h.up.snapshot(); posts != 3 {
+				t.Fatal("an older matching message hid a real change reverting the agenda", posts)
+			}
+		})
+	}
+}
+
 func TestDuePassageUpdatesAgendaWithoutFeedChange(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

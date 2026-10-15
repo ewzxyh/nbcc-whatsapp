@@ -1,10 +1,32 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestLockDownWhatsAppHighlightKeepsExistingFeedHash(t *testing.T) {
+	rawTitle := "Quiz #2 - Requires Respondus LockDown Browser"
+	p, err := testPreview([]byte(testICS(testEvent("protected", rawTitle+" - Due", ";TZID=America/Halifax:20261013T180000", ""))), testNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"🔒 *ASSESSMENT / TEST — LockDown Browser required*", "*Quiz #2*: Starts at *18:00*", "⚠️ *_4 hours left_*"} {
+		if !strings.Contains(p.Text, want) {
+			t.Errorf("missing %q in %s", want, p.Text)
+		}
+	}
+	legacy := "2026-10-13T18:00:00-03:00\x00• *Linux I* — *" + rawTitle + "*: Due at *18:00*."
+	canonical := fmt.Sprintf("0:%d:%s\n", len(legacy), legacy) + agendaLinkLabel + "https://nbcc.example.test/\nType *#NBCC* for the latest agenda."
+	if p.FeedHash != textHash(canonical) {
+		t.Fatal("presentation change would broadcast an unchanged feed on deployment")
+	}
+	if strings.Contains(p.Text, "Requires Respondus") || strings.Contains(p.Text, ": Due") {
+		t.Fatal("protected assessment still uses the unformatted title or Due wording", p.Text)
+	}
+}
 
 func testPreview(raw []byte, now time.Time) (Preview, error) {
 	return buildPreview(raw, now, make([]byte, 32), "https://nbcc.example.test", nil)

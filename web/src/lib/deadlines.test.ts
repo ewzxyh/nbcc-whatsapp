@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgendaItem } from './api'
 import {
   countdownFor,
+  illustrationFor,
   DEFAULT_WINDOW_MS,
   durationText,
   itemInstant,
@@ -11,6 +12,7 @@ import {
   timeLeftShare,
   zonedInstant,
 } from './deadlines'
+import { groupEntries } from './agenda'
 
 const DAY = 86_400_000
 const HOUR = 3_600_000
@@ -31,6 +33,29 @@ const item = (overrides: Partial<AgendaItem>): AgendaItem => ({
   endAt: null,
   endDate: null,
   ...overrides,
+})
+
+describe('today activity illustrations', () => {
+  const due = Date.parse('2026-10-14T23:59:00-03:00')
+  const entry = groupEntries([item({})])[0]
+
+  it('switches at four hours, using the actual Due rather than access closing', () => {
+    expect(illustrationFor(entry, due - 4 * HOUR - 1)).toBe('/today-monkey.png')
+    expect(illustrationFor(entry, due - 4 * HOUR)).toBe('/today-monkey-urgent.png')
+    expect(illustrationFor(entry, due - 1)).toBe('/today-monkey-urgent.png')
+    expect(illustrationFor(entry, due)).toBeNull()
+    const closing = groupEntries([item({ phase: 'closes' })])[0]
+    expect(illustrationFor(closing, due - HOUR)).toBe('/today-monkey.png')
+  })
+
+  it('uses Saint John dates, excludes campus events and retains the assessment fallback', () => {
+    expect(illustrationFor(entry, Date.parse('2026-10-14T00:30:00Z'))).toBeNull()
+    expect(illustrationFor(entry, Date.parse('2026-10-15T00:30:00Z'))).toBe('/today-monkey-urgent.png')
+    expect(illustrationFor(groupEntries([item({ type: 'event', phase: null, activityId: null })])[0], due - HOUR)).toBeNull()
+    const assessment = groupEntries([item({ title: 'Quiz - Requires Respondus LockDown Browser' })])[0]
+    expect(illustrationFor(assessment, due - 4 * HOUR)).toBe('/today-monkey-urgent.png')
+    expect(illustrationFor(assessment, due - 2 * DAY)).toBe('/assessment-chimp.png')
+  })
 })
 
 describe('zonedInstant (Saint John wall clock)', () => {

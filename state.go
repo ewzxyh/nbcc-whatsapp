@@ -24,6 +24,7 @@ type Job struct {
 	Kind         string    `json:"kind,omitempty"`
 	Target       string    `json:"target,omitempty"`
 	FeedHash     string    `json:"feed_hash,omitempty"`
+	MessageHash  string    `json:"message_hash,omitempty"`
 	ReminderKeys []string  `json:"reminder_keys,omitempty"`
 	ExpiresAt    time.Time `json:"expires_at,omitempty"`
 }
@@ -250,13 +251,33 @@ func (s *Store) activityVersions(target string) map[string]string {
 	return versions
 }
 
-func (s *Store) recent(hash, target string, campus bool) (bool, string) {
+func (s *Store) recentHashes(hash, target string, campus bool) map[string]bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if campus {
-		return s.data.Target == target && s.data.LastCampusHash == hash && s.data.LastCampusMessageHash != "", s.data.LastCampusMessageHash
+	hashes := map[string]bool{}
+	if s.data.Target != target {
+		return hashes
 	}
-	return s.data.Target == target && s.data.LastSentHash == hash && s.data.LastMessageHash != "", s.data.LastMessageHash
+	if campus {
+		if s.data.LastCampusHash == hash && s.data.LastCampusMessageHash != "" {
+			hashes[s.data.LastCampusMessageHash] = true
+		}
+	} else if s.data.LastSentHash == hash && s.data.LastMessageHash != "" {
+		hashes[s.data.LastMessageHash] = true
+	}
+	var latestAccepted time.Time
+	for _, job := range s.data.Jobs {
+		if job.Target == target && job.Kind != "" && (job.Kind == "campus") == campus && job.Status == "accepted" && job.CreatedAt.After(latestAccepted) {
+			latestAccepted = job.CreatedAt
+		}
+	}
+	// An upstream timeout can occur after WhatsApp accepted the message.
+	for _, job := range s.data.Jobs {
+		if job.Target == target && job.FeedHash == hash && job.Kind != "" && (job.Kind == "campus") == campus && job.Status != "accepted" && !job.CreatedAt.Before(latestAccepted) && job.MessageHash != "" {
+			hashes[job.MessageHash] = true
+		}
+	}
+	return hashes
 }
 
 func (s *Store) observeCampus(p Preview, target string, now time.Time) error {

@@ -13,7 +13,8 @@ import {
   isLockDownAssessment,
   type AgendaEntry,
 } from '@/lib/agenda'
-import { openingInstant } from '@/lib/deadlines'
+import { illustrationFor, openingInstant } from '@/lib/deadlines'
+import { useNow } from '@/hooks/useNow'
 import { useOpeningAt } from '@/hooks/useOpenings'
 import { assessmentKind } from '@/lib/share'
 import { progressKeyOf } from '@/lib/progress'
@@ -27,6 +28,7 @@ interface EntryCardProps {
 
 function EntryCardBase({ entry, showDate = false, onSelect }: EntryCardProps) {
   const assessment = isLockDownAssessment(entry)
+  const illustration = illustrationFor(entry, useNow())
   const kind = entry.kind === 'activity' ? assessmentKind(entry.title) : null
   const knownOpening = useOpeningAt(entry.kind === 'activity' ? entry.activityId : null)
   const openedAt = knownOpening ?? (entry.kind === 'activity' ? openingInstant(entry.phases) : null)
@@ -39,8 +41,8 @@ function EntryCardBase({ entry, showDate = false, onSelect }: EntryCardProps) {
           onClick={(event) => onSelect(entry, event.currentTarget)}
           className={cn('block w-full rounded-2xl p-4 text-left hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none', assessment && 'hover:bg-destructive/5 focus-visible:ring-destructive')}
         >
-          <span className={cn('block', assessment && 'flex flex-wrap items-center gap-4')}>
-            <span className={cn('block', assessment && 'min-w-0 flex-[1_1_20rem]')}>
+          <span className={cn('block', illustration && 'flex flex-wrap items-center gap-4')}>
+            <span className={cn('block', illustration && 'min-w-0 flex-[1_1_20rem]')}>
               <span className="flex flex-wrap items-center gap-2">
                 {entry.kind === 'event' ? (
                   <Badge variant="outline" className="border-input text-foreground">
@@ -94,8 +96,8 @@ function EntryCardBase({ entry, showDate = false, onSelect }: EntryCardProps) {
                 )}
               </span>
             </span>
-            {assessment && (
-              <img src="/assessment-chimp.png" alt="" aria-hidden="true" width={1200} height={917} loading="lazy" className="ml-auto h-auto w-28 shrink-0 rounded-xl object-contain mix-blend-multiply sm:w-40 lg:w-52" />
+            {illustration && (
+              <img src={illustration} alt="" aria-hidden="true" width={illustration === '/assessment-chimp.png' ? 1200 : 1254} height={illustration === '/assessment-chimp.png' ? 917 : 1254} loading="lazy" className={cn('ml-auto h-auto w-28 shrink-0 rounded-xl object-contain sm:w-40 lg:w-52', illustration === '/assessment-chimp.png' && 'mix-blend-multiply')} />
             )}
           </span>
         </button>

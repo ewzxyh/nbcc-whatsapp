@@ -1,5 +1,5 @@
 import type { AgendaItem, Phase } from './api'
-import { addDays, MONCTON_TIME_ZONE } from './agenda'
+import { addDays, isLockDownAssessment, monctonDate, MONCTON_TIME_ZONE, type AgendaEntry } from './agenda'
 
 const MINUTE_MS = 60_000
 const HOUR_MS = 60 * MINUTE_MS
@@ -43,6 +43,18 @@ export function itemInstant(item: AgendaItem): number {
   if (item.startAt && !item.allDay) return Date.parse(item.startAt)
   const endOfDay = item.type === 'activity' && item.phase !== 'available'
   return endOfDay ? zonedInstant(addDays(item.date, 1), 0, 0) : zonedInstant(item.date, 0, 0)
+}
+
+export function illustrationFor(entry: AgendaEntry, now: number): string | null {
+  if (entry.kind !== 'activity') return null
+  if (entry.date === monctonDate(new Date(now).toISOString())) {
+    const due = entry.phases.find((phase) => phase.phase === 'due')
+    const left = due ? itemInstant(due) - now : null
+    if (left === null || left > 0) {
+      return left !== null && left <= 4 * HOUR_MS ? '/today-monkey-urgent.png' : '/today-monkey.png'
+    }
+  }
+  return isLockDownAssessment(entry) ? '/assessment-chimp.png' : null
 }
 
 /** The opening instant of an assessment, from its "available" phase when one is loaded. */
