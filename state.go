@@ -386,7 +386,7 @@ func (s *Store) queueReminders(p Preview, target string, now time.Time) error {
 	return s.save(next)
 }
 
-func (s *Store) complete(job Job, p Preview, target, lastPart string, now time.Time) error {
+func (s *Store) complete(job Job, p Preview, target, lastPart string, now time.Time, messageTimestamp int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := s.copyState(now)
@@ -400,7 +400,11 @@ func (s *Store) complete(job Job, p Preview, target, lastPart string, now time.T
 		next.LastActivityVersions = p.activityVersions
 		// A command combined with a reminder keeps its original command ID.
 		if job.Kind == "command" || strings.HasPrefix(job.ID, "command:") {
-			next.CommandAfter = now.Add(15 * time.Minute)
+			sentAt := now
+			if messageTimestamp > 0 && messageTimestamp >= job.CreatedAt.UnixMilli() && messageTimestamp <= now.UnixMilli() {
+				sentAt = time.UnixMilli(messageTimestamp)
+			}
+			next.CommandAfter = sentAt.Add(15 * time.Minute)
 		}
 		for _, key := range job.ReminderKeys {
 			next.Reminders[key] = job.ExpiresAt

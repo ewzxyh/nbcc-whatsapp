@@ -240,7 +240,7 @@ func (a *App) processPending(ctx context.Context) error {
 			if recent != nil {
 				if job.Text != "" && job.MessageHash == textHash(recent.Text) {
 					job.NextPart = len(messageParts(job.Text))
-					err = a.store.complete(job, p, target, recent.Text, a.now())
+					err = a.store.complete(job, p, target, recent.Text, a.now(), recent.Timestamp)
 				} else {
 					job.Status, job.Text = "suppressed", ""
 					err = a.store.update(job, a.now())
@@ -306,7 +306,7 @@ func (a *App) processPending(ctx context.Context) error {
 		job.Attempts++
 		if err == nil && len(parts) > 0 {
 			a.status.recordSend("")
-			if err = a.store.complete(job, p, target, parts[len(parts)-1], a.now()); err != nil {
+			if err = a.store.complete(job, p, target, parts[len(parts)-1], a.now(), 0); err != nil {
 				return err
 			}
 			continue

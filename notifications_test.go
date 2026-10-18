@@ -284,6 +284,81 @@ func TestCommandCooldownAndRecentConversation(t *testing.T) {
 	}
 }
 
+func TestRecoveredCommandCooldownUsesActualResponseTime(t *testing.T) {
+	for _, delay := range []time.Duration{2 * time.Minute, 20 * time.Minute} {
+		t.Run(delay.String(), func(t *testing.T) {
+			h := newHarness(t)
+			ctx := context.Background()
+			h.up.feed = testICS(testEvent("due", "Lab - Due", ";VALUE=DATE:20261016", ""))
+			h.settingsPatch(map[string]any{"sendEnabled": true})
+			h.app.command(groupMessage{ID: "timeout-command"}, h.app.settings.current())
+			var sentAt time.Time
+			h.up.hook = func(r *http.Request) (*http.Response, bool) {
+				if r.Method != http.MethodPost {
+					return nil, false
+				}
+				var body struct{ Text string }
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				h.clock.advance(30 * time.Second)
+				sentAt = h.clock.now()
+				h.up.posts++
+				h.up.sent = append(h.up.sent, body.Text)
+				h.up.messages = []groupMessage{{ID: "actual-response", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: body.Text, Timestamp: sentAt.UnixMilli()}}
+				return testResponse(504, `{}`), true
+			}
+			if err := h.app.processPending(ctx); err != nil {
+				t.Fatal(err)
+			}
+			h.up.hook = nil
+			h.clock.advance(delay)
+			if err := h.app.processPending(ctx); err != nil {
+				t.Fatal(err)
+			}
+			store, err := openStore(h.app.store.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.app.store = store
+			want := sentAt.Add(15 * time.Minute)
+			if !store.data.CommandAfter.Equal(want) {
+				t.Fatalf("cooldown ends at %s; want actual response time + 15 minutes: %s", store.data.CommandAfter, want)
+			}
+			if h.clock.now().Before(want) {
+				h.clock.advance(want.Sub(h.clock.now()))
+			}
+			h.app.command(groupMessage{ID: "sent-during-block", Timestamp: want.Add(-time.Millisecond).UnixMilli()}, h.app.settings.current())
+			if pending, _ := store.counts(); pending != 0 {
+				t.Fatal("a command sent during the block was replayed after confirmation")
+			}
+			h.app.command(groupMessage{ID: "after-real-block", Timestamp: h.clock.now().UnixMilli()}, h.app.settings.current())
+			if pending, _ := store.counts(); pending != 1 {
+				t.Fatal("a new command after the real cooldown was blocked", pending)
+			}
+			if posts, _ := h.up.snapshot(); posts != 1 {
+				t.Fatal("recovering the timeout resent the response", posts)
+			}
+		})
+	}
+}
+
+func TestRecoveredCommandRejectsUnusableResponseTimestamps(t *testing.T) {
+	for _, timestamp := range []int64{0, testNow().Add(-11 * time.Minute).UnixMilli(), testNow().Add(time.Millisecond).UnixMilli()} {
+		t.Run(fmt.Sprint(timestamp), func(t *testing.T) {
+			h := newHarness(t)
+			now := h.clock.now()
+			job := Job{ID: "command:test", Kind: "command", CreatedAt: now.Add(-10 * time.Minute)}
+			if err := h.app.store.complete(job, Preview{}, "target", "response", now, timestamp); err != nil {
+				t.Fatal(err)
+			}
+			if !h.app.store.data.CommandAfter.Equal(now.Add(15 * time.Minute)) {
+				t.Fatal("missing or out-of-bounds timestamp bypassed or prolonged the fallback cooldown")
+			}
+		})
+	}
+}
+
 func TestAutomaticMessagesDoNotStartCommandCooldown(t *testing.T) {
 	for _, kind := range []string{"agenda", "reminder"} {
 		t.Run(kind, func(t *testing.T) {
