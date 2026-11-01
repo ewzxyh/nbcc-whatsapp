@@ -322,7 +322,9 @@ func (a *App) runWorker(ctx context.Context) {
 			check()
 		case <-jobs.C:
 			a.errs.note("schedule", a.schedule(ctx))
-			a.errs.note("group history", a.pollCommands(ctx))
+			if ran, err := a.pollCommands(ctx); ran {
+				a.errs.note("group history", err)
+			}
 			a.errs.note("queue", a.processPending(ctx))
 		}
 	}

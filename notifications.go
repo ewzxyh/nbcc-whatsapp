@@ -96,17 +96,18 @@ func (a *App) schedule(ctx context.Context) error {
 }
 
 // The provider webhook excludes fromMe messages; history polling also covers commands from our number.
-func (a *App) pollCommands(ctx context.Context) error {
+// ran is false when no poll was due, so a skipped poll is not mistaken for a recovery.
+func (a *App) pollCommands(ctx context.Context) (ran bool, err error) {
 	a.workMu.Lock()
 	defer a.workMu.Unlock()
 	s := a.settings.current()
 	now := a.now()
 	if !s.SendEnabled || !s.grapnelSendReady() || now.Sub(a.lastHistoryAt) < time.Minute {
-		return nil
+		return false, nil
 	}
 	since := a.store.commandSince()
 	if since.IsZero() {
-		return nil
+		return false, nil
 	}
 	cutoff := a.lastHistoryReadAt.Add(-5 * time.Minute)
 	if cutoff.Before(since) {
@@ -116,7 +117,7 @@ func (a *App) pollCommands(ctx context.Context) error {
 	for offset := 0; ; {
 		page, err := a.groupMessages(ctx, s, 100, offset)
 		if err != nil {
-			return err
+			return true, err
 		}
 		older := false
 		for _, m := range page.Messages {
@@ -133,13 +134,13 @@ func (a *App) pollCommands(ctx context.Context) error {
 			}
 			if strings.EqualFold(strings.TrimSpace(m.Text), "#NBCC") {
 				if err = a.command(m, s); err != nil {
-					return err
+					return true, err
 				}
 			}
 		}
 		if older || !page.Pagination.HasMore {
 			a.lastHistoryReadAt = now
-			return nil
+			return true, nil
 		}
 		offset = page.Pagination.NextOffset
 	}

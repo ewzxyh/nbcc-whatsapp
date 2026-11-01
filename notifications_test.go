@@ -907,7 +907,7 @@ func TestOwnNumberCommandFromHistory(t *testing.T) {
 	h.app.processPending(ctx)
 	h.clock.advance(16 * time.Minute)
 	h.up.messages = []groupMessage{{ID: "own-command", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: "#NBCC", Timestamp: h.clock.now().UnixMilli()}}
-	if err := h.app.pollCommands(ctx); err != nil {
+	if _, err := h.app.pollCommands(ctx); err != nil {
 		t.Fatal(err)
 	}
 	h.app.processPending(ctx)
