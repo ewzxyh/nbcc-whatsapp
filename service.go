@@ -28,6 +28,7 @@ type App struct {
 	sessions          *sessionStore
 	limiter           *attemptLimiter
 	status            *runtimeStatus
+	errs              *errorLog
 	now               func() time.Time
 	feed              feedCache
 	workMu            sync.Mutex
@@ -299,9 +300,8 @@ func (a *App) runWorker(ctx context.Context) {
 			return
 		}
 		changed, queued, err := a.check(ctx)
-		if err != nil {
-			log.Printf("feed check: %v", err)
-		} else if changed {
+		a.errs.note("feed check", err)
+		if err == nil && changed {
 			log.Printf("feed changed; queued=%t send_enabled=%t", queued, a.settings.current().SendEnabled)
 		}
 	}
@@ -321,15 +321,9 @@ func (a *App) runWorker(ctx context.Context) {
 		case <-poll.C:
 			check()
 		case <-jobs.C:
-			if err := a.schedule(ctx); err != nil {
-				log.Printf("schedule: %v", err)
-			}
-			if err := a.pollCommands(ctx); err != nil {
-				log.Printf("group history: %v", err)
-			}
-			if err := a.processPending(ctx); err != nil {
-				log.Printf("queue: %v", err)
-			}
+			a.errs.note("schedule", a.schedule(ctx))
+			a.errs.note("group history", a.pollCommands(ctx))
+			a.errs.note("queue", a.processPending(ctx))
 		}
 	}
 }

@@ -27,6 +27,7 @@ type Config struct {
 	WebDir         string
 	TrustedProxyIP net.IP
 	AdminEmail     string
+	SentryDSN      string
 }
 
 func envOr(key, fallback string) string {
@@ -43,12 +44,13 @@ func loadConfig() Config {
 		WebDir:         envOr("WEB_DIR", "web/dist"),
 		TrustedProxyIP: net.ParseIP(os.Getenv("TRUSTED_PROXY_IP")),
 		AdminEmail:     os.Getenv("ADMIN_EMAIL"),
+		SentryDSN:      os.Getenv("SENTRY_DSN"),
 	}
 }
 
 // newApp builds an App with its request-independent state. Stores are opened by the caller.
 func newApp(cfg Config, client *http.Client) *App {
-	return &App{cfg: cfg, client: client, now: time.Now, sessions: newSessionStore(), limiter: newAttemptLimiter(), status: &runtimeStatus{}}
+	return &App{cfg: cfg, client: client, now: time.Now, sessions: newSessionStore(), limiter: newAttemptLimiter(), status: &runtimeStatus{}, errs: newErrorLog(cfg.SentryDSN, client)}
 }
 
 func main() {

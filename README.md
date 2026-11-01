@@ -66,7 +66,7 @@ All application settings are edited in `/admin`. They take effect immediately; n
 | `agendaCacheMinutes` | Public agenda cache lifetime, 1 to 1440; default 60 |
 | `courseInstructors` | Map of course code to instructor name, up to 100 entries; shown on public course activities |
 
-Infrastructure values are set in the container environment, not in the admin area: `LISTEN_ADDR` (default `:8080`), `STATE_PATH` (default `data/state.json`; Docker uses `/data/state.json`), `WEB_DIR` (default `web/dist`; Docker uses `/web`), `NBCC_BIND_PORT` (compose host port, default 8080), and `TRUSTED_PROXY_IP` (optional exact Docker gateway address of the local reverse proxy).
+Infrastructure values are set in the container environment, not in the admin area: `LISTEN_ADDR` (default `:8080`), `STATE_PATH` (default `data/state.json`; Docker uses `/data/state.json`), `WEB_DIR` (default `web/dist`; Docker uses `/web`), `NBCC_BIND_PORT` (compose host port, default 8080), `TRUSTED_PROXY_IP` (optional exact Docker gateway address of the local reverse proxy), and `SENTRY_DSN` (optional GlitchTip/Sentry DSN; worker errors are reported once per change and given-up deliveries are reported, and a repeated worker error is logged once until it clears).
 
 ## Admin endpoints
 
@@ -113,7 +113,7 @@ The admin UI is served at `/admin` (and `/admin/...`) from `WEB_DIR/admin/index.
 
 ## HTTPS requirement
 
-Session cookies are `Secure` when the request is HTTPS or carries `X-Forwarded-Proto: https`. Use HTTPS for `/admin`. The Nginx example in `ops/` proxies everything, including `/admin` and `/api/admin`, to the service and sets `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto`. Keep those headers when adapting it.
+Session cookies are `Secure` when the request is HTTPS or carries `X-Forwarded-Proto: https`. Use HTTPS for `/admin`. The reverse proxy must forward everything, including `/admin` and `/api/admin`, to the service and set `X-Real-IP` and `X-Forwarded-Proto`. With Caddy: `reverse_proxy nbcc:8080 { header_up X-Real-IP {client_ip} }` (Caddy sets `X-Forwarded-Proto` itself).
 
 ## Security measures
 
@@ -159,7 +159,7 @@ Problems with course activities (`Available`, `Due`, `Availability Ends`) are st
 
 ## Webhook deployment
 
-Expose the service through a public HTTPS reverse proxy on port 443. The `ops/` directory provides Nginx and certificate renewal examples using the placeholder domain **`nbcc.example.com`**. Replace it with your domain, set `publicBaseUrl` to the same origin in `/admin`, and adjust the backend port to match `NBCC_BIND_PORT`.
+Expose the service through a public HTTPS reverse proxy on port 443. Set `publicBaseUrl` in `/admin` to that HTTPS origin, and adjust the backend port to match `NBCC_BIND_PORT`.
 
 Preserve the raw request body and `X-Grapnel-*` headers. After HTTPS works, register the callback from the admin area (**Webhook**). Registration does not enable sending, and the service refuses to replace an existing instance webhook.
 

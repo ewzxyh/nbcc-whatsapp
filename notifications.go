@@ -326,6 +326,9 @@ func (a *App) processPending(ctx context.Context) error {
 			}
 		}
 		log.Printf("job %s: %v", job.ID, err)
+		if job.Status == "failed" {
+			a.errs.report("job "+job.ID, "gave up after "+strconv.Itoa(job.Attempts)+" attempts: "+err.Error())
+		}
 		if err = a.store.update(job, a.now()); err != nil {
 			return err
 		}
