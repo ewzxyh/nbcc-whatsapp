@@ -921,6 +921,42 @@ func TestOwnNumberCommandFromHistory(t *testing.T) {
 	}
 }
 
+func TestBusyHistoryPollRetriesQuietly(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	h.app.processPending(ctx)
+	busy := true
+	h.up.hook = func(r *http.Request) (*http.Response, bool) {
+		if busy && strings.HasSuffix(r.URL.Path, "/groups/messages") {
+			return testResponse(409, `{"code":"instance_busy"}`), true
+		}
+		return nil, false
+	}
+	at := h.clock.now().Add(time.Minute).UnixMilli()
+	for i := 0; i < 5; i++ {
+		h.clock.advance(time.Minute)
+		if ran, err := h.app.pollCommands(ctx); ran || err != nil {
+			t.Fatal("transient busy reported", i, ran, err)
+		}
+	}
+	h.clock.advance(time.Minute)
+	if ran, err := h.app.pollCommands(ctx); !ran || err == nil {
+		t.Fatal("lasting busy not reported", ran, err)
+	}
+	busy = false
+	h.up.messages = []groupMessage{{ID: "missed-command", ChatID: testGroup, IsGroup: true, FromMe: ptrBool(true), Text: "#NBCC", Timestamp: at}}
+	h.clock.advance(time.Minute)
+	if ran, err := h.app.pollCommands(ctx); !ran || err != nil {
+		t.Fatal(ran, err)
+	}
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 2 {
+		t.Fatal("command sent while busy was missed", posts)
+	}
+}
+
 func TestRecentHistoryTrustBoundary(t *testing.T) {
 	h := newHarness(t)
 	h.settingsPatch(map[string]any{"sendEnabled": true})

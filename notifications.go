@@ -116,9 +116,16 @@ func (a *App) pollCommands(ctx context.Context) (ran bool, err error) {
 	a.lastHistoryAt = now
 	for offset := 0; ; {
 		page, err := a.groupMessages(ctx, s, 100, offset)
+		var apiErr *apiError
+		// Grapnel answers 409 instance_busy with "wait and retry"; the next poll re-reads from the same cutoff, so only a lasting busy is an error.
+		if errors.As(err, &apiErr) && apiErr.Status == 409 && a.historyBusy < 5 {
+			a.historyBusy++
+			return false, nil
+		}
 		if err != nil {
 			return true, err
 		}
+		a.historyBusy = 0
 		older := false
 		for _, m := range page.Messages {
 			at := time.UnixMilli(m.Timestamp)

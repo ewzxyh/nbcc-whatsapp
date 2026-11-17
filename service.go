@@ -37,6 +37,7 @@ type App struct {
 	monitorDay        string
 	lastHistoryAt     time.Time
 	lastHistoryReadAt time.Time
+	historyBusy       int // consecutive 409 instance_busy history polls
 	// onPollTicker is a test hook, called whenever the worker creates its poll ticker.
 	onPollTicker func(time.Duration)
 }
