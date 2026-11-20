@@ -1156,3 +1156,25 @@ func TestDisabledDuringFailedSendCancelsRetry(t *testing.T) {
 		t.Fatal("retry survived disabling during failed POST")
 	}
 }
+
+func TestDisconnectedInstanceKeepsAgendaUntilReconnect(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.up.hook = func(r *http.Request) (*http.Response, bool) {
+		if strings.Contains(r.URL.Path, "/instances/") {
+			return testResponse(409, `{"code":"instance_not_connected"}`), true
+		}
+		return nil, false
+	}
+	h.settingsPatch(map[string]any{"sendEnabled": true})
+	h.app.check(ctx)
+	for i := 0; i < 10; i++ {
+		h.app.processPending(ctx)
+		h.clock.advance(33 * time.Minute)
+	}
+	h.up.hook = nil
+	h.app.processPending(ctx)
+	if posts, _ := h.up.snapshot(); posts != 1 {
+		t.Fatal("agenda was not sent after the instance reconnected", posts)
+	}
+}

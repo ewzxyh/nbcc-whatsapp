@@ -324,8 +324,10 @@ func (a *App) processPending(ctx context.Context) error {
 		}
 		var apiErr *apiError
 		permanent := errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != 408 && apiErr.Status != 409 && apiErr.Status != 429
+		// A disconnected WhatsApp needs a person to reconnect it; keep the job until it expires so it is sent once they do.
+		disconnected := apiErr != nil && apiErr.Status == 409 && apiErr.Code == "instancenotconnected"
 		a.status.recordSend(failureCode)
-		if job.Attempts >= 8 || permanent {
+		if job.Attempts >= 8 && !disconnected || permanent {
 			job.Status, job.Text = "failed", ""
 		} else {
 			job.NextAttempt = a.now().Add(time.Minute * time.Duration(1<<min(job.Attempts, 5)))
@@ -336,6 +338,8 @@ func (a *App) processPending(ctx context.Context) error {
 		log.Printf("job %s: %v", job.ID, err)
 		if job.Status == "failed" {
 			a.errs.report("job "+job.ID, "gave up after "+strconv.Itoa(job.Attempts)+" attempts: "+err.Error())
+		} else if disconnected && job.Attempts == 8 {
+			a.errs.report("job "+job.ID, "WhatsApp instance still disconnected after 8 attempts; retrying until the job expires")
 		}
 		if err = a.store.update(job, a.now()); err != nil {
 			return err
